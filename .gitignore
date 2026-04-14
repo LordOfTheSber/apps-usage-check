@@ -15,6 +15,8 @@ obj/
 # Logs
 logs/
 *.log
+app-build.log
+restore-app.log
 
 # Test and coverage artifacts
 TestResults/
@@ -25,6 +27,7 @@ coverage/
 # NuGet
 packages/
 *.nupkg
+.dotnet/
 
 # OS files
 Thumbs.db
