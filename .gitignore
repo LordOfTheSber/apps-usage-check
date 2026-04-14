@@ -1,0 +1,31 @@
+# Build output
+bin/
+obj/
+
+# User-specific files
+*.user
+*.rsuser
+*.suo
+
+# IDE settings
+.vs/
+.vscode/
+*.code-workspace
+
+# Logs
+logs/
+*.log
+
+# Test and coverage artifacts
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# NuGet
+packages/
+*.nupkg
+
+# OS files
+Thumbs.db
+Desktop.ini
