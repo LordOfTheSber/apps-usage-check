@@ -14,13 +14,22 @@ namespace AppsUsageCheck.App;
 
 public partial class App : Application
 {
+    private const string SingleInstanceMutexName = @"Local\AppsUsageCheck";
     private IHost? _host;
     private ITrackingEngine? _trackingEngine;
     private ITrayIconService? _trayIconService;
+    private Mutex? _singleInstanceMutex;
+    private bool _ownsSingleInstanceMutex;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        if (!TryAcquireSingleInstance(e.Args))
+        {
+            Shutdown(0);
+            return;
+        }
 
         try
         {
@@ -60,27 +69,34 @@ public partial class App : Application
 
     protected override async void OnExit(ExitEventArgs e)
     {
-        if (_trayIconService is IDisposable disposableTrayIconService)
+        try
         {
-            disposableTrayIconService.Dispose();
-            _trayIconService = null;
-        }
-
-        if (_trackingEngine is not null)
-        {
-            await _trackingEngine.StopAsync().ConfigureAwait(true);
-        }
-
-        if (_host is not null)
-        {
-            try
+            if (_trayIconService is IDisposable disposableTrayIconService)
             {
-                await _host.StopAsync().ConfigureAwait(true);
+                disposableTrayIconService.Dispose();
+                _trayIconService = null;
             }
-            finally
+
+            if (_trackingEngine is not null)
             {
-                _host.Dispose();
+                await _trackingEngine.StopAsync().ConfigureAwait(true);
             }
+
+            if (_host is not null)
+            {
+                try
+                {
+                    await _host.StopAsync().ConfigureAwait(true);
+                }
+                finally
+                {
+                    _host.Dispose();
+                }
+            }
+        }
+        finally
+        {
+            ReleaseSingleInstanceMutex();
         }
 
         base.OnExit(e);
@@ -141,5 +157,54 @@ public partial class App : Application
     private static bool ShouldStartMinimized(IEnumerable<string> args)
     {
         return args.Any(arg => string.Equals(arg, "--minimized", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool TryAcquireSingleInstance(IEnumerable<string> args)
+    {
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var createdNew);
+        if (createdNew)
+        {
+            _ownsSingleInstanceMutex = true;
+            return true;
+        }
+
+        _singleInstanceMutex.Dispose();
+        _singleInstanceMutex = null;
+
+        if (!ShouldStartMinimized(args))
+        {
+            MessageBox.Show(
+                "Apps Usage Check is already running in the system tray.",
+                "AppsUsageCheck",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+
+        return false;
+    }
+
+    private void ReleaseSingleInstanceMutex()
+    {
+        if (_singleInstanceMutex is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (_ownsSingleInstanceMutex)
+            {
+                _singleInstanceMutex.ReleaseMutex();
+            }
+        }
+        catch (ApplicationException)
+        {
+        }
+        finally
+        {
+            _singleInstanceMutex.Dispose();
+            _singleInstanceMutex = null;
+            _ownsSingleInstanceMutex = false;
+        }
     }
 }

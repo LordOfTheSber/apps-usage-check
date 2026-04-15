@@ -167,7 +167,9 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
 
                 var adjustmentTotal = await dbContext.TimeAdjustments
                     .AsNoTracking()
-                    .Where(adjustment => adjustment.TrackedProcessId == trackedProcessId)
+                    .Where(adjustment =>
+                        adjustment.TrackedProcessId == trackedProcessId &&
+                        adjustment.AdjustmentType == TimeAdjustmentTypes.Running)
                     .Select(adjustment => (long?)adjustment.AdjustmentSeconds)
                     .SumAsync(ct)
                     .ConfigureAwait(false);
@@ -189,14 +191,94 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
                     .SumAsync(ct)
                     .ConfigureAwait(false);
 
-                var positiveManualAdjustmentTotal = await dbContext.TimeAdjustments
+                var adjustmentTotal = await dbContext.TimeAdjustments
                     .AsNoTracking()
-                    .Where(adjustment => adjustment.TrackedProcessId == trackedProcessId && adjustment.AdjustmentSeconds > 0)
+                    .Where(adjustment =>
+                        adjustment.TrackedProcessId == trackedProcessId &&
+                        adjustment.AdjustmentType == TimeAdjustmentTypes.Foreground)
                     .Select(adjustment => (long?)adjustment.AdjustmentSeconds)
                     .SumAsync(ct)
                     .ConfigureAwait(false);
 
-                return (sessionTotal ?? 0L) + (positiveManualAdjustmentTotal ?? 0L);
+                return (sessionTotal ?? 0L) + (adjustmentTotal ?? 0L);
+            },
+            cancellationToken);
+    }
+
+    public Task<long> GetTotalRunningSecondsAsync(
+        Guid trackedProcessId,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default)
+    {
+        from = from.ToUniversalTime();
+        to = to.ToUniversalTime();
+        ValidateRange(from, to);
+
+        return ExecuteReadAsync(
+            async (dbContext, ct) =>
+            {
+                var sessionTotal = await dbContext.UsageSessions
+                    .AsNoTracking()
+                    .Where(session =>
+                        session.TrackedProcessId == trackedProcessId &&
+                        session.SessionStart >= from &&
+                        session.SessionStart < to)
+                    .Select(session => (long?)session.TotalRunningSeconds)
+                    .SumAsync(ct)
+                    .ConfigureAwait(false);
+
+                var adjustmentTotal = await dbContext.TimeAdjustments
+                    .AsNoTracking()
+                    .Where(adjustment =>
+                        adjustment.TrackedProcessId == trackedProcessId &&
+                        adjustment.AdjustmentType == TimeAdjustmentTypes.Running &&
+                        adjustment.AppliedAt >= from &&
+                        adjustment.AppliedAt < to)
+                    .Select(adjustment => (long?)adjustment.AdjustmentSeconds)
+                    .SumAsync(ct)
+                    .ConfigureAwait(false);
+
+                return (sessionTotal ?? 0L) + (adjustmentTotal ?? 0L);
+            },
+            cancellationToken);
+    }
+
+    public Task<long> GetTotalForegroundSecondsAsync(
+        Guid trackedProcessId,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default)
+    {
+        from = from.ToUniversalTime();
+        to = to.ToUniversalTime();
+        ValidateRange(from, to);
+
+        return ExecuteReadAsync(
+            async (dbContext, ct) =>
+            {
+                var sessionTotal = await dbContext.UsageSessions
+                    .AsNoTracking()
+                    .Where(session =>
+                        session.TrackedProcessId == trackedProcessId &&
+                        session.SessionStart >= from &&
+                        session.SessionStart < to)
+                    .Select(session => (long?)session.ForegroundSeconds)
+                    .SumAsync(ct)
+                    .ConfigureAwait(false);
+
+                var adjustmentTotal = await dbContext.TimeAdjustments
+                    .AsNoTracking()
+                    .Where(adjustment =>
+                        adjustment.TrackedProcessId == trackedProcessId &&
+                        adjustment.AdjustmentType == TimeAdjustmentTypes.Foreground &&
+                        adjustment.AppliedAt >= from &&
+                        adjustment.AppliedAt < to)
+                    .Select(adjustment => (long?)adjustment.AdjustmentSeconds)
+                    .SumAsync(ct)
+                    .ConfigureAwait(false);
+
+                return (sessionTotal ?? 0L) + (adjustmentTotal ?? 0L);
             },
             cancellationToken);
     }
@@ -291,6 +373,14 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
                 var delay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, retryAttempt)));
                 await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
             }
+        }
+    }
+
+    private static void ValidateRange(DateTimeOffset from, DateTimeOffset to)
+    {
+        if (to <= from)
+        {
+            throw new ArgumentOutOfRangeException(nameof(to), "The time range end must be after the start.");
         }
     }
 

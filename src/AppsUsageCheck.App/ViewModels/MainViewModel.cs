@@ -1,23 +1,31 @@
 using System.Collections.ObjectModel;
+using System.Windows.Threading;
 using AppsUsageCheck.App.Services;
+using AppsUsageCheck.Core.Enums;
 using AppsUsageCheck.Core.Interfaces;
 using AppsUsageCheck.Core.Models;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using System.Windows.Threading;
 
 namespace AppsUsageCheck.App.ViewModels;
 
 public partial class MainViewModel : ObservableObject, IDisposable
 {
+    private static readonly TimeSpan LiveFilteredRefreshInterval = TimeSpan.FromSeconds(5);
+
     private readonly ITrackingEngine _trackingEngine;
     private readonly IDialogService _dialogService;
     private readonly TimeProvider _timeProvider;
     private readonly DispatcherTimer _refreshTimer;
     private readonly Dictionary<Guid, ProcessItemViewModel> _itemsById = [];
+    private readonly HashSet<Guid> _filteredTotalsProcessIds = [];
     private readonly AsyncRelayCommand _pauseAllCommand;
     private readonly AsyncRelayCommand _resumeAllCommand;
     private bool _isInitialized;
+    private bool _isRefreshing;
+    private bool _isNormalizingCustomRange;
+    private TimeRange? _lastAppliedTimeRange;
+    private DateTimeOffset? _nextFilteredRefreshAt;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasProcesses))]
@@ -26,13 +34,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private DateTimeOffset lastRefreshedAt;
 
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsCustomRangeSelected))]
+    private TimeRangePreset selectedPreset = TimeRangePreset.AllTime;
+
+    [ObservableProperty]
+    private DateTime? customStartDate;
+
+    [ObservableProperty]
+    private DateTime? customEndDate;
+
     public MainViewModel(ITrackingEngine trackingEngine, IDialogService dialogService, TimeProvider timeProvider)
     {
         _trackingEngine = trackingEngine ?? throw new ArgumentNullException(nameof(trackingEngine));
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
 
+        var today = _timeProvider.GetLocalNow().Date;
+
         Processes = [];
+        CustomStartDate = today;
+        CustomEndDate = today;
         AddProcessCommand = new AsyncRelayCommand(AddProcessAsync);
         _pauseAllCommand = new AsyncRelayCommand(PauseAllAsync, CanPauseAll);
         _resumeAllCommand = new AsyncRelayCommand(ResumeAllAsync, CanResumeAll);
@@ -40,7 +62,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ResumeAllCommand = _resumeAllCommand;
         OpenSettingsCommand = new RelayCommand(OpenSettings);
         ExitCommand = new RelayCommand(RequestExit);
-        RefreshCommand = new RelayCommand(RefreshStatuses);
+        RefreshCommand = new RelayCommand(ForceRefresh);
 
         _refreshTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
@@ -54,6 +76,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<ProcessItemViewModel> Processes { get; }
 
     public bool HasProcesses => Processes.Count > 0;
+
+    public bool IsCustomRangeSelected => SelectedPreset == TimeRangePreset.Custom;
 
     public int TrackedProcessCount => Processes.Count;
 
@@ -75,23 +99,49 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public IRelayCommand RefreshCommand { get; }
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync()
     {
         if (_isInitialized)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         _isInitialized = true;
-        RefreshStatuses();
+        await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
         _refreshTimer.Start();
-        return Task.CompletedTask;
     }
 
     public void Dispose()
     {
         _refreshTimer.Stop();
         _refreshTimer.Tick -= OnRefreshTimerTick;
+    }
+
+    partial void OnSelectedPresetChanged(TimeRangePreset value)
+    {
+        if (value == TimeRangePreset.Custom)
+        {
+            EnsureCustomDatesInitialized();
+        }
+
+        ResetFilteredRefreshState();
+
+        if (_isInitialized)
+        {
+            RequestRefresh(forceFilteredTotalsRefresh: true);
+        }
+    }
+
+    partial void OnCustomStartDateChanged(DateTime? value)
+    {
+        NormalizeCustomRange(changedStart: true);
+        OnCustomRangeChanged();
+    }
+
+    partial void OnCustomEndDateChanged(DateTime? value)
+    {
+        NormalizeCustomRange(changedStart: false);
+        OnCustomRangeChanged();
     }
 
     private async Task AddProcessAsync()
@@ -109,7 +159,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             await _trackingEngine.AddTrackedProcessAsync(request.ProcessName, request.DisplayName).ConfigureAwait(true);
-            RefreshStatuses();
+            await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
         }
         catch (Exception exception)
         {
@@ -119,7 +169,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OpenSettings()
     {
-        _dialogService.ShowInformation("Settings", "Settings UI is planned for Phase 8.");
+        try
+        {
+            _dialogService.ShowSettingsDialog();
+        }
+        catch (Exception exception)
+        {
+            _dialogService.ShowError("Unable to open settings", exception.Message);
+        }
     }
 
     private void RequestExit()
@@ -132,7 +189,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             await _trackingEngine.PauseAllTrackingAsync().ConfigureAwait(true);
-            RefreshStatuses();
+            await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
         }
         catch (Exception exception)
         {
@@ -145,7 +202,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             await _trackingEngine.ResumeAllTrackingAsync().ConfigureAwait(true);
-            RefreshStatuses();
+            await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
         }
         catch (Exception exception)
         {
@@ -158,7 +215,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             await _trackingEngine.PauseTrackingAsync(trackedProcessId).ConfigureAwait(true);
-            RefreshStatuses();
+            await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
         }
         catch (Exception exception)
         {
@@ -171,11 +228,43 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             await _trackingEngine.ResumeTrackingAsync(trackedProcessId).ConfigureAwait(true);
-            RefreshStatuses();
+            await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
         }
         catch (Exception exception)
         {
             _dialogService.ShowError("Unable to resume tracking", exception.Message);
+        }
+    }
+
+    private async Task EditTimeAsync(Guid trackedProcessId)
+    {
+        try
+        {
+            var status = _trackingEngine.GetAllStatuses()
+                .FirstOrDefault(candidate => candidate.TrackedProcessId == trackedProcessId);
+
+            if (status is null)
+            {
+                _dialogService.ShowError("Unable to edit time", "The selected process is no longer available.");
+                await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
+                return;
+            }
+
+            var request = await _dialogService.ShowEditTimeDialogAsync(status).ConfigureAwait(true);
+            if (request is null)
+            {
+                return;
+            }
+
+            await _trackingEngine
+                .ApplyTimeAdjustmentAsync(trackedProcessId, request.Target, request.AdjustmentSeconds, request.Reason)
+                .ConfigureAwait(true);
+
+            await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            _dialogService.ShowError("Unable to edit time", exception.Message);
         }
     }
 
@@ -192,7 +281,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try
         {
             await _trackingEngine.RemoveTrackedProcessAsync(trackedProcessId).ConfigureAwait(true);
-            RefreshStatuses();
+            await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
         }
         catch (Exception exception)
         {
@@ -200,50 +289,165 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void RefreshStatuses()
+    private async Task RefreshStatusesAsync(bool forceFilteredTotalsRefresh = false)
     {
-        var statuses = _trackingEngine.GetAllStatuses()
-            .OrderBy(status => status.DisplayName ?? status.ProcessName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(status => status.ProcessName, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        var activeIds = statuses.Select(status => status.TrackedProcessId).ToHashSet();
-        foreach (var missingId in _itemsById.Keys.Where(id => !activeIds.Contains(id)).ToArray())
+        if (_isRefreshing)
         {
-            _itemsById.Remove(missingId);
+            return;
         }
 
-        var orderedItems = new List<ProcessItemViewModel>(statuses.Length);
-        foreach (var status in statuses)
+        _isRefreshing = true;
+
+        try
         {
-            if (!_itemsById.TryGetValue(status.TrackedProcessId, out var item))
+            var nowLocal = _timeProvider.GetLocalNow();
+            var statuses = _trackingEngine.GetAllStatuses()
+                .OrderBy(status => status.DisplayName ?? status.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(status => status.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var activeIds = statuses.Select(status => status.TrackedProcessId).ToHashSet();
+            var filteredTotals = await GetFilteredTotalsIfNeededAsync(activeIds, nowLocal, forceFilteredTotalsRefresh).ConfigureAwait(true);
+
+            foreach (var missingId in _itemsById.Keys.Where(id => !activeIds.Contains(id)).ToArray())
             {
-                item = new ProcessItemViewModel(
-                    status.TrackedProcessId,
-                    PauseTrackingAsync,
-                    ResumeTrackingAsync,
-                    RemoveTrackedProcessAsync);
-                _itemsById.Add(status.TrackedProcessId, item);
+                _itemsById.Remove(missingId);
+                _filteredTotalsProcessIds.Remove(missingId);
             }
 
-            item.Update(status);
-            orderedItems.Add(item);
+            var orderedItems = new List<ProcessItemViewModel>(statuses.Length);
+            foreach (var status in statuses)
+            {
+                if (!_itemsById.TryGetValue(status.TrackedProcessId, out var item))
+                {
+                    item = new ProcessItemViewModel(
+                        status.TrackedProcessId,
+                        PauseTrackingAsync,
+                        ResumeTrackingAsync,
+                        EditTimeAsync,
+                        RemoveTrackedProcessAsync);
+                    _itemsById.Add(status.TrackedProcessId, item);
+                }
+
+                item.Update(status);
+
+                if (SelectedPreset == TimeRangePreset.AllTime)
+                {
+                    item.ClearFilteredTotals();
+                }
+                else if (filteredTotals is not null)
+                {
+                    item.SetFilteredTotals(
+                        filteredTotals.TryGetValue(status.TrackedProcessId, out var totals)
+                            ? totals
+                            : new UsageTotals(0L, 0L));
+                }
+
+                orderedItems.Add(item);
+            }
+
+            RebuildCollection(orderedItems);
+
+            LastRefreshedAt = nowLocal;
+            StatusMessage = BuildStatusMessage();
+
+            OnPropertyChanged(nameof(HasProcesses));
+            OnPropertyChanged(nameof(TrackedProcessCount));
+            OnPropertyChanged(nameof(ActiveProcessCount));
+            OnPropertyChanged(nameof(RunningProcessCount));
+            OnPropertyChanged(nameof(TrayToolTipText));
+            _pauseAllCommand.NotifyCanExecuteChanged();
+            _resumeAllCommand.NotifyCanExecuteChanged();
+        }
+        catch (Exception exception)
+        {
+            LastRefreshedAt = _timeProvider.GetLocalNow();
+            StatusMessage = $"Unable to refresh usage data: {exception.Message}";
+        }
+        finally
+        {
+            _isRefreshing = false;
+        }
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, UsageTotals>?> GetFilteredTotalsIfNeededAsync(
+        HashSet<Guid> activeIds,
+        DateTimeOffset nowLocal,
+        bool forceFilteredTotalsRefresh)
+    {
+        if (SelectedPreset == TimeRangePreset.AllTime)
+        {
+            ResetFilteredRefreshState();
+            return null;
         }
 
-        RebuildCollection(orderedItems);
+        var range = BuildSelectedTimeRange(nowLocal);
+        var shouldRefreshFilteredTotals =
+            forceFilteredTotalsRefresh
+            || _lastAppliedTimeRange != range
+            || !_filteredTotalsProcessIds.SetEquals(activeIds)
+            || (range.IsLiveAt(nowLocal) && (!_nextFilteredRefreshAt.HasValue || nowLocal >= _nextFilteredRefreshAt.Value));
 
-        LastRefreshedAt = _timeProvider.GetLocalNow();
-        StatusMessage = statuses.Length == 0
-            ? "No tracked processes yet. Add a running app or enter a process name manually."
-            : $"Tracking {TrackedProcessCount} process(es). {RunningProcessCount} running right now.";
+        if (!shouldRefreshFilteredTotals)
+        {
+            return null;
+        }
 
-        OnPropertyChanged(nameof(HasProcesses));
-        OnPropertyChanged(nameof(TrackedProcessCount));
-        OnPropertyChanged(nameof(ActiveProcessCount));
-        OnPropertyChanged(nameof(RunningProcessCount));
-        OnPropertyChanged(nameof(TrayToolTipText));
-        _pauseAllCommand.NotifyCanExecuteChanged();
-        _resumeAllCommand.NotifyCanExecuteChanged();
+        var filteredTotals = await _trackingEngine
+            .GetFilteredTotalsAsync(range.From, range.To)
+            .ConfigureAwait(true);
+
+        _lastAppliedTimeRange = range;
+        _filteredTotalsProcessIds.Clear();
+        _filteredTotalsProcessIds.UnionWith(activeIds);
+        _nextFilteredRefreshAt = range.IsLiveAt(nowLocal)
+            ? nowLocal.Add(LiveFilteredRefreshInterval)
+            : null;
+
+        return filteredTotals;
+    }
+
+    private TimeRange BuildSelectedTimeRange(DateTimeOffset nowLocal)
+    {
+        return TimeRange.Create(
+            SelectedPreset,
+            nowLocal,
+            _timeProvider.LocalTimeZone,
+            CustomStartDate,
+            CustomEndDate);
+    }
+
+    private string BuildStatusMessage()
+    {
+        if (TrackedProcessCount == 0)
+        {
+            return "No tracked processes yet. Add a running app or enter a process name manually.";
+        }
+
+        if (SelectedPreset == TimeRangePreset.AllTime)
+        {
+            return $"Tracking {TrackedProcessCount} process(es). {RunningProcessCount} running right now.";
+        }
+
+        return $"Showing {GetSelectedRangeLabel()}. Tracking {TrackedProcessCount} process(es); {RunningProcessCount} running right now.";
+    }
+
+    private string GetSelectedRangeLabel()
+    {
+        return SelectedPreset switch
+        {
+            TimeRangePreset.Today => "today's usage",
+            TimeRangePreset.Yesterday => "yesterday's usage",
+            TimeRangePreset.Last3Days => "the last 3 days",
+            TimeRangePreset.Last7Days => "the last 7 days",
+            TimeRangePreset.Last14Days => "the last 14 days",
+            TimeRangePreset.Last30Days => "the last 30 days",
+            TimeRangePreset.ThisWeek => "this week's usage",
+            TimeRangePreset.LastWeek => "last week's usage",
+            TimeRangePreset.ThisMonth => "this month's usage",
+            TimeRangePreset.LastMonth => "last month's usage",
+            TimeRangePreset.Custom => $"usage from {CustomStartDate:yyyy-MM-dd} to {CustomEndDate:yyyy-MM-dd}",
+            _ => "all usage",
+        };
     }
 
     private void RebuildCollection(IReadOnlyList<ProcessItemViewModel> orderedItems)
@@ -262,7 +466,87 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnRefreshTimerTick(object? sender, EventArgs e)
     {
-        RefreshStatuses();
+        RequestRefresh();
+    }
+
+    private void ForceRefresh()
+    {
+        RequestRefresh(forceFilteredTotalsRefresh: true);
+    }
+
+    private void OnCustomRangeChanged()
+    {
+        if (!_isInitialized || _isNormalizingCustomRange || SelectedPreset != TimeRangePreset.Custom)
+        {
+            return;
+        }
+
+        ResetFilteredRefreshState();
+        RequestRefresh(forceFilteredTotalsRefresh: true);
+    }
+
+    private void RequestRefresh(bool forceFilteredTotalsRefresh = false)
+    {
+        _ = RefreshStatusesAsync(forceFilteredTotalsRefresh);
+    }
+
+    private void NormalizeCustomRange(bool changedStart)
+    {
+        if (_isNormalizingCustomRange)
+        {
+            return;
+        }
+
+        _isNormalizingCustomRange = true;
+
+        try
+        {
+            if (!CustomStartDate.HasValue && CustomEndDate.HasValue)
+            {
+                CustomStartDate = CustomEndDate.Value.Date;
+            }
+            else if (!CustomEndDate.HasValue && CustomStartDate.HasValue)
+            {
+                CustomEndDate = CustomStartDate.Value.Date;
+            }
+            else if (CustomStartDate.HasValue && CustomEndDate.HasValue && CustomStartDate.Value.Date > CustomEndDate.Value.Date)
+            {
+                if (changedStart)
+                {
+                    CustomEndDate = CustomStartDate.Value.Date;
+                }
+                else
+                {
+                    CustomStartDate = CustomEndDate.Value.Date;
+                }
+            }
+        }
+        finally
+        {
+            _isNormalizingCustomRange = false;
+        }
+    }
+
+    private void EnsureCustomDatesInitialized()
+    {
+        var today = _timeProvider.GetLocalNow().Date;
+
+        if (!CustomStartDate.HasValue)
+        {
+            CustomStartDate = today;
+        }
+
+        if (!CustomEndDate.HasValue)
+        {
+            CustomEndDate = CustomStartDate ?? today;
+        }
+    }
+
+    private void ResetFilteredRefreshState()
+    {
+        _lastAppliedTimeRange = null;
+        _nextFilteredRefreshAt = null;
+        _filteredTotalsProcessIds.Clear();
     }
 
     private bool CanPauseAll()

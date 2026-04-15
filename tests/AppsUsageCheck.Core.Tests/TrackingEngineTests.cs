@@ -113,6 +113,102 @@ public sealed class TrackingEngineTests
         Assert.Equal(trackedProcess.Id, createdSession.TrackedProcessId);
         Assert.Equal(now, createdSession.SessionStart);
         Assert.Null(createdSession.SessionEnd);
+
+        Assert.Equal(0, processDetector.GetRunningProcessNamesCallCount);
+        Assert.Single(processDetector.TargetLookupRequests);
+        Assert.Equal(["code"], processDetector.TargetLookupRequests[0]);
+        Assert.Equal(1, foregroundDetector.GetForegroundProcessNameCallCount);
+    }
+
+    [Fact]
+    public async Task ProcessTickAsync_PausedTrackedProcessesAreExcludedFromTargetedLookup()
+    {
+        var now = new DateTimeOffset(2026, 4, 14, 12, 15, 0, TimeSpan.Zero);
+        var timeProvider = new FakeTimeProvider(now);
+        var activeTrackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "chrome",
+        };
+        var pausedTrackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "code",
+            IsPaused = true,
+        };
+
+        var repository = new FakeUsageRepository([activeTrackedProcess, pausedTrackedProcess]);
+        var processDetector = new FakeProcessDetector(
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "chrome.exe",
+                "code.exe",
+            });
+        var foregroundDetector = new FakeForegroundDetector("chrome");
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30),
+            timeProvider: timeProvider);
+
+        await engine.StartAsync();
+        await engine.ProcessTickAsync();
+
+        Assert.Equal(0, processDetector.GetRunningProcessNamesCallCount);
+        Assert.Single(processDetector.TargetLookupRequests);
+        Assert.Equal(["chrome"], processDetector.TargetLookupRequests[0]);
+
+        var statuses = engine.GetAllStatuses()
+            .OrderBy(status => status.ProcessName, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Collection(
+            statuses,
+            chromeStatus =>
+            {
+                Assert.Equal("chrome", chromeStatus.ProcessName);
+                Assert.True(chromeStatus.IsRunning);
+            },
+            codeStatus =>
+            {
+                Assert.Equal("code", codeStatus.ProcessName);
+                Assert.Equal(TrackingState.Paused, codeStatus.TrackingState);
+                Assert.False(codeStatus.IsRunning);
+                Assert.False(codeStatus.IsForeground);
+            });
+    }
+
+    [Fact]
+    public async Task ProcessTickAsync_NoActiveTrackedProcesses_SkipsTargetedAndForegroundLookups()
+    {
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "chrome",
+            IsPaused = true,
+        };
+
+        var repository = new FakeUsageRepository([trackedProcess]);
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "chrome.exe" });
+        var foregroundDetector = new FakeForegroundDetector("chrome");
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30));
+
+        await engine.StartAsync();
+        await engine.ProcessTickAsync();
+
+        Assert.Equal(0, processDetector.GetRunningProcessNamesCallCount);
+        Assert.Empty(processDetector.TargetLookupRequests);
+        Assert.Equal(0, foregroundDetector.GetForegroundProcessNameCallCount);
+        Assert.Empty(repository.AddedSessions);
+        Assert.Empty(repository.UpdatedSessions);
     }
 
     [Fact]
@@ -252,6 +348,149 @@ public sealed class TrackingEngineTests
     }
 
     [Fact]
+    public async Task ApplyTimeAdjustmentAsync_RunningAdjustment_UpdatesRunningTotalAndPersistsAuditRecord()
+    {
+        var now = new DateTimeOffset(2026, 4, 14, 14, 10, 0, TimeSpan.Zero);
+        var timeProvider = new FakeTimeProvider(now);
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "chrome",
+        };
+
+        var repository = new FakeUsageRepository(
+            new[] { trackedProcess },
+            new Dictionary<Guid, long> { [trackedProcess.Id] = 120 },
+            new Dictionary<Guid, long> { [trackedProcess.Id] = 45 });
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30),
+            timeProvider: timeProvider);
+
+        await engine.StartAsync();
+        await engine.ApplyTimeAdjustmentAsync(trackedProcess.Id, TimeAdjustmentTarget.Running, 30, "  Imported gap  ");
+
+        var status = Assert.Single(engine.GetAllStatuses());
+        Assert.Equal(150, status.TotalRunningSeconds);
+        Assert.Equal(45, status.ForegroundSeconds);
+
+        var adjustment = Assert.Single(repository.AddedTimeAdjustments);
+        Assert.Equal(trackedProcess.Id, adjustment.TrackedProcessId);
+        Assert.Equal(TimeAdjustmentTypes.Running, adjustment.AdjustmentType);
+        Assert.Equal(30, adjustment.AdjustmentSeconds);
+        Assert.Equal("Imported gap", adjustment.Reason);
+        Assert.Equal(now, adjustment.AppliedAt);
+    }
+
+    [Fact]
+    public async Task ApplyTimeAdjustmentAsync_ForegroundAdjustment_UpdatesForegroundTotalAndPersistsAuditRecord()
+    {
+        var now = new DateTimeOffset(2026, 4, 14, 14, 20, 0, TimeSpan.Zero);
+        var timeProvider = new FakeTimeProvider(now);
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "chrome",
+        };
+
+        var repository = new FakeUsageRepository(
+            new[] { trackedProcess },
+            new Dictionary<Guid, long> { [trackedProcess.Id] = 180 },
+            new Dictionary<Guid, long> { [trackedProcess.Id] = 60 });
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30),
+            timeProvider: timeProvider);
+
+        await engine.StartAsync();
+        await engine.ApplyTimeAdjustmentAsync(trackedProcess.Id, TimeAdjustmentTarget.Foreground, 15, "Recovered focus time");
+
+        var status = Assert.Single(engine.GetAllStatuses());
+        Assert.Equal(180, status.TotalRunningSeconds);
+        Assert.Equal(75, status.ForegroundSeconds);
+
+        var adjustment = Assert.Single(repository.AddedTimeAdjustments);
+        Assert.Equal(TimeAdjustmentTypes.Foreground, adjustment.AdjustmentType);
+        Assert.Equal(15, adjustment.AdjustmentSeconds);
+    }
+
+    [Fact]
+    public async Task ApplyTimeAdjustmentAsync_SubtractingPastZero_ThrowsInvalidOperationException()
+    {
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "chrome",
+        };
+
+        var repository = new FakeUsageRepository(
+            new[] { trackedProcess },
+            new Dictionary<Guid, long> { [trackedProcess.Id] = 120 },
+            new Dictionary<Guid, long> { [trackedProcess.Id] = 45 });
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30));
+
+        await engine.StartAsync();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => engine.ApplyTimeAdjustmentAsync(trackedProcess.Id, TimeAdjustmentTarget.Foreground, -46));
+
+        Assert.Contains("below zero", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(repository.AddedTimeAdjustments);
+    }
+
+    [Fact]
+    public async Task ApplyTimeAdjustmentAsync_RunningBelowForeground_ThrowsInvalidOperationException()
+    {
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "chrome",
+        };
+
+        var repository = new FakeUsageRepository(
+            new[] { trackedProcess },
+            new Dictionary<Guid, long> { [trackedProcess.Id] = 120 },
+            new Dictionary<Guid, long> { [trackedProcess.Id] = 45 });
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30));
+
+        await engine.StartAsync();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => engine.ApplyTimeAdjustmentAsync(trackedProcess.Id, TimeAdjustmentTarget.Running, -90));
+
+        Assert.Contains("Foreground time cannot exceed running time", exception.Message, StringComparison.Ordinal);
+        Assert.Empty(repository.AddedTimeAdjustments);
+    }
+
+    [Fact]
     public async Task PauseAllTrackingAsync_PausesOnlyActiveProcessesAndClosesOpenSessions()
     {
         var now = new DateTimeOffset(2026, 4, 14, 14, 30, 0, TimeSpan.Zero);
@@ -372,6 +611,68 @@ public sealed class TrackingEngineTests
     }
 
     [Fact]
+    public async Task GetFilteredTotalsAsync_ReturnsRepositoryTotalsForRequestedRange()
+    {
+        var trackedProcessA = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "chrome",
+        };
+        var trackedProcessB = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "code",
+        };
+        var from = new DateTimeOffset(2026, 4, 10, 0, 0, 0, TimeSpan.Zero);
+        var to = new DateTimeOffset(2026, 4, 11, 0, 0, 0, TimeSpan.Zero);
+
+        var repository = new FakeUsageRepository(
+            [trackedProcessA, trackedProcessB],
+            filteredRunningSeconds: new Dictionary<RangeQueryKey, long>
+            {
+                [new RangeQueryKey(trackedProcessA.Id, from, to)] = 120,
+                [new RangeQueryKey(trackedProcessB.Id, from, to)] = 45,
+            },
+            filteredForegroundSeconds: new Dictionary<RangeQueryKey, long>
+            {
+                [new RangeQueryKey(trackedProcessA.Id, from, to)] = 60,
+                [new RangeQueryKey(trackedProcessB.Id, from, to)] = 5,
+            });
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30));
+
+        await engine.StartAsync();
+
+        var totals = await engine.GetFilteredTotalsAsync(from, to);
+
+        Assert.Equal(2, totals.Count);
+        Assert.Equal(new UsageTotals(120, 60), totals[trackedProcessA.Id]);
+        Assert.Equal(new UsageTotals(45, 5), totals[trackedProcessB.Id]);
+
+        Assert.Equal(
+            new HashSet<RangeQueryKey>
+            {
+                new(trackedProcessA.Id, from, to),
+                new(trackedProcessB.Id, from, to),
+            },
+            repository.FilteredRunningRequests.ToHashSet());
+        Assert.Equal(
+            new HashSet<RangeQueryKey>
+            {
+                new(trackedProcessA.Id, from, to),
+                new(trackedProcessB.Id, from, to),
+            },
+            repository.FilteredForegroundRequests.ToHashSet());
+    }
+
+    [Fact]
     public async Task ProcessTickAsync_FlushIntervalReached_PersistsOpenSession()
     {
         var now = new DateTimeOffset(2026, 4, 14, 15, 0, 0, TimeSpan.Zero);
@@ -482,7 +783,41 @@ public sealed class TrackingEngineTests
             _processes = processes;
         }
 
-        public IReadOnlySet<string> GetRunningProcessNames() => _processes;
+        public int GetRunningProcessNamesCallCount { get; private set; }
+
+        public List<string[]> TargetLookupRequests { get; } = [];
+
+        public IReadOnlySet<string> GetRunningProcessNames()
+        {
+            GetRunningProcessNamesCallCount++;
+            return _processes;
+        }
+
+        public IReadOnlySet<string> GetRunningTargetProcessNames(IEnumerable<string> targetProcessNames)
+        {
+            ArgumentNullException.ThrowIfNull(targetProcessNames);
+
+            var normalizedTargets = targetProcessNames
+                .Select(ProcessNameNormalizer.Normalize)
+                .Where(processName => processName.Length > 0)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(processName => processName, StringComparer.Ordinal)
+                .ToArray();
+            TargetLookupRequests.Add(normalizedTargets);
+
+            var runningProcesses = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var processName in _processes)
+            {
+                var normalizedProcessName = ProcessNameNormalizer.Normalize(processName);
+                if (normalizedProcessName.Length > 0 && normalizedTargets.Contains(normalizedProcessName, StringComparer.Ordinal))
+                {
+                    runningProcesses.Add(normalizedProcessName);
+                }
+            }
+
+            return runningProcesses;
+        }
 
         public void SetProcesses(IReadOnlySet<string> processes)
         {
@@ -499,7 +834,13 @@ public sealed class TrackingEngineTests
             _foregroundProcessName = foregroundProcessName;
         }
 
-        public string? GetForegroundProcessName() => _foregroundProcessName;
+        public int GetForegroundProcessNameCallCount { get; private set; }
+
+        public string? GetForegroundProcessName()
+        {
+            GetForegroundProcessNameCallCount++;
+            return _foregroundProcessName;
+        }
 
         public void SetForeground(string? foregroundProcessName)
         {
@@ -529,13 +870,17 @@ public sealed class TrackingEngineTests
         private readonly Dictionary<Guid, TrackedProcess> _trackedProcesses;
         private readonly Dictionary<Guid, long> _totalRunningSeconds;
         private readonly Dictionary<Guid, long> _totalForegroundSeconds;
+        private readonly Dictionary<RangeQueryKey, long> _filteredRunningSeconds;
+        private readonly Dictionary<RangeQueryKey, long> _filteredForegroundSeconds;
         private readonly Dictionary<Guid, UsageSession> _sessionsById;
 
         public FakeUsageRepository(
             IEnumerable<TrackedProcess> trackedProcesses,
             IDictionary<Guid, long>? totalRunningSeconds = null,
             IDictionary<Guid, long>? totalForegroundSeconds = null,
-            IEnumerable<UsageSession>? usageSessions = null)
+            IEnumerable<UsageSession>? usageSessions = null,
+            IDictionary<RangeQueryKey, long>? filteredRunningSeconds = null,
+            IDictionary<RangeQueryKey, long>? filteredForegroundSeconds = null)
         {
             _trackedProcesses = trackedProcesses.ToDictionary(process => process.Id, CloneTrackedProcess);
             _totalRunningSeconds = totalRunningSeconds is null
@@ -544,6 +889,12 @@ public sealed class TrackingEngineTests
             _totalForegroundSeconds = totalForegroundSeconds is null
                 ? []
                 : new Dictionary<Guid, long>(totalForegroundSeconds);
+            _filteredRunningSeconds = filteredRunningSeconds is null
+                ? []
+                : new Dictionary<RangeQueryKey, long>(filteredRunningSeconds);
+            _filteredForegroundSeconds = filteredForegroundSeconds is null
+                ? []
+                : new Dictionary<RangeQueryKey, long>(filteredForegroundSeconds);
             _sessionsById = usageSessions is null
                 ? []
                 : usageSessions.ToDictionary(session => session.Id, CloneUsageSession);
@@ -556,6 +907,12 @@ public sealed class TrackingEngineTests
         public List<UsageSession> AddedSessions { get; } = [];
 
         public List<UsageSession> UpdatedSessions { get; } = [];
+
+        public List<TimeAdjustment> AddedTimeAdjustments { get; } = [];
+
+        public List<RangeQueryKey> FilteredRunningRequests { get; } = [];
+
+        public List<RangeQueryKey> FilteredForegroundRequests { get; } = [];
 
         public Task<IReadOnlyList<TrackedProcess>> GetTrackedProcessesAsync(CancellationToken cancellationToken = default)
         {
@@ -614,6 +971,22 @@ public sealed class TrackingEngineTests
 
         public Task AddTimeAdjustmentAsync(TimeAdjustment adjustment, CancellationToken cancellationToken = default)
         {
+            var adjustmentCopy = CloneTimeAdjustment(adjustment);
+            AddedTimeAdjustments.Add(adjustmentCopy);
+
+            if (adjustmentCopy.AdjustmentType == TimeAdjustmentTypes.Running)
+            {
+                _totalRunningSeconds[adjustmentCopy.TrackedProcessId] =
+                    (_totalRunningSeconds.TryGetValue(adjustmentCopy.TrackedProcessId, out var currentValue) ? currentValue : 0L)
+                    + adjustmentCopy.AdjustmentSeconds;
+            }
+            else if (adjustmentCopy.AdjustmentType == TimeAdjustmentTypes.Foreground)
+            {
+                _totalForegroundSeconds[adjustmentCopy.TrackedProcessId] =
+                    (_totalForegroundSeconds.TryGetValue(adjustmentCopy.TrackedProcessId, out var currentValue) ? currentValue : 0L)
+                    + adjustmentCopy.AdjustmentSeconds;
+            }
+
             return Task.CompletedTask;
         }
 
@@ -625,6 +998,28 @@ public sealed class TrackingEngineTests
         public Task<long> GetTotalForegroundSecondsAsync(Guid trackedProcessId, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(_totalForegroundSeconds.TryGetValue(trackedProcessId, out var value) ? value : 0L);
+        }
+
+        public Task<long> GetTotalRunningSecondsAsync(
+            Guid trackedProcessId,
+            DateTimeOffset from,
+            DateTimeOffset to,
+            CancellationToken cancellationToken = default)
+        {
+            var key = new RangeQueryKey(trackedProcessId, from, to);
+            FilteredRunningRequests.Add(key);
+            return Task.FromResult(_filteredRunningSeconds.TryGetValue(key, out var value) ? value : 0L);
+        }
+
+        public Task<long> GetTotalForegroundSecondsAsync(
+            Guid trackedProcessId,
+            DateTimeOffset from,
+            DateTimeOffset to,
+            CancellationToken cancellationToken = default)
+        {
+            var key = new RangeQueryKey(trackedProcessId, from, to);
+            FilteredForegroundRequests.Add(key);
+            return Task.FromResult(_filteredForegroundSeconds.TryGetValue(key, out var value) ? value : 0L);
         }
 
         private static TrackedProcess CloneTrackedProcess(TrackedProcess trackedProcess)
@@ -656,5 +1051,20 @@ public sealed class TrackingEngineTests
                 UpdatedAt = session.UpdatedAt,
             };
         }
+
+        private static TimeAdjustment CloneTimeAdjustment(TimeAdjustment adjustment)
+        {
+            return new TimeAdjustment
+            {
+                Id = adjustment.Id,
+                TrackedProcessId = adjustment.TrackedProcessId,
+                AdjustmentType = adjustment.AdjustmentType,
+                AdjustmentSeconds = adjustment.AdjustmentSeconds,
+                Reason = adjustment.Reason,
+                AppliedAt = adjustment.AppliedAt,
+            };
+        }
     }
+
+    private sealed record RangeQueryKey(Guid TrackedProcessId, DateTimeOffset From, DateTimeOffset To);
 }

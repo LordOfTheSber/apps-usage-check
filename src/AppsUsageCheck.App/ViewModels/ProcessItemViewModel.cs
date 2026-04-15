@@ -9,6 +9,7 @@ public partial class ProcessItemViewModel : ObservableObject
 {
     private readonly Func<Guid, Task> _pauseAsync;
     private readonly Func<Guid, Task> _resumeAsync;
+    private readonly Func<Guid, Task> _editTimeAsync;
     private readonly Func<Guid, Task> _removeAsync;
 
     [ObservableProperty]
@@ -36,10 +37,20 @@ public partial class ProcessItemViewModel : ObservableObject
     private bool isForeground;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayedRunningSeconds))]
     private long totalRunningSeconds;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayedForegroundSeconds))]
     private long foregroundSeconds;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayedRunningSeconds))]
+    private long? filteredRunningSeconds;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayedForegroundSeconds))]
+    private long? filteredForegroundSeconds;
 
     [ObservableProperty]
     private long currentSessionRunningSeconds;
@@ -51,14 +62,17 @@ public partial class ProcessItemViewModel : ObservableObject
         Guid trackedProcessId,
         Func<Guid, Task> pauseAsync,
         Func<Guid, Task> resumeAsync,
+        Func<Guid, Task> editTimeAsync,
         Func<Guid, Task> removeAsync)
     {
         TrackedProcessId = trackedProcessId;
         _pauseAsync = pauseAsync ?? throw new ArgumentNullException(nameof(pauseAsync));
         _resumeAsync = resumeAsync ?? throw new ArgumentNullException(nameof(resumeAsync));
+        _editTimeAsync = editTimeAsync ?? throw new ArgumentNullException(nameof(editTimeAsync));
         _removeAsync = removeAsync ?? throw new ArgumentNullException(nameof(removeAsync));
 
         TogglePauseCommand = new AsyncRelayCommand(TogglePauseAsync);
+        EditTimeCommand = new AsyncRelayCommand(EditTimeAsync);
         RemoveCommand = new AsyncRelayCommand(RemoveAsync);
     }
 
@@ -80,7 +94,13 @@ public partial class ProcessItemViewModel : ObservableObject
 
     public string ActionText => IsPaused ? "Resume" : "Pause";
 
+    public long DisplayedRunningSeconds => FilteredRunningSeconds ?? TotalRunningSeconds;
+
+    public long DisplayedForegroundSeconds => FilteredForegroundSeconds ?? ForegroundSeconds;
+
     public IAsyncRelayCommand TogglePauseCommand { get; }
+
+    public IAsyncRelayCommand EditTimeCommand { get; }
 
     public IAsyncRelayCommand RemoveCommand { get; }
 
@@ -99,6 +119,20 @@ public partial class ProcessItemViewModel : ObservableObject
         CurrentSessionForegroundSeconds = status.CurrentSessionForegroundSeconds;
     }
 
+    public void SetFilteredTotals(UsageTotals totals)
+    {
+        ArgumentNullException.ThrowIfNull(totals);
+
+        FilteredRunningSeconds = totals.RunningSeconds;
+        FilteredForegroundSeconds = totals.ForegroundSeconds;
+    }
+
+    public void ClearFilteredTotals()
+    {
+        FilteredRunningSeconds = null;
+        FilteredForegroundSeconds = null;
+    }
+
     private Task TogglePauseAsync()
     {
         return IsPaused ? _resumeAsync(TrackedProcessId) : _pauseAsync(TrackedProcessId);
@@ -107,5 +141,10 @@ public partial class ProcessItemViewModel : ObservableObject
     private Task RemoveAsync()
     {
         return _removeAsync(TrackedProcessId);
+    }
+
+    private Task EditTimeAsync()
+    {
+        return _editTimeAsync(TrackedProcessId);
     }
 }

@@ -6,7 +6,7 @@ Build a high-quality Windows desktop application from scratch that tracks how mu
 
 ## Prerequisites
 
-1. **.NET 10 SDK** — must be installed (download from dotnet.microsoft.com if missing)
+1. **.NET 8 SDK** — must be installed (download from dotnet.microsoft.com if missing)
 2. **PostgreSQL** server running locally (or remotely, connection string configurable)
 3. **Visual Studio 2022** (17.8+) recommended for WPF designer support
 
@@ -130,7 +130,7 @@ CREATE TABLE time_adjustments (
 
 **Files to create**:
 - `AppsUsageCheck.sln` (via `dotnet new sln`)
-- `Directory.Build.props` — shared: `net10.0-windows`, nullable enable, implicit usings, warnings as errors
+- `Directory.Build.props` — shared: `net8.0-windows`, nullable enable, implicit usings, warnings as errors
 - `.gitignore`, `.editorconfig`
 - `src/AppsUsageCheck.Core/AppsUsageCheck.Core.csproj` — class library
 - `src/AppsUsageCheck.Infrastructure/AppsUsageCheck.Infrastructure.csproj` — class library
@@ -265,6 +265,33 @@ CREATE TABLE time_adjustments (
 
 ---
 
+## Phase 7.5: Time Range Filtering
+
+**Goal**: Let users filter displayed running/foreground times by date range — specific day, custom range, or quick presets.
+
+**Files to create**:
+- `Core/Enums/TimeRangePreset.cs` — AllTime, Today, Yesterday, Last3Days, Last7Days, Last14Days, Last30Days, ThisWeek, LastWeek, ThisMonth, LastMonth, Custom
+- `Core/Models/TimeRange.cs` — Record with `From`/`To` `DateTimeOffset`, factory methods per preset
+
+**Files to modify**:
+- `Core/Interfaces/IUsageRepository.cs` — Add `GetTotalRunningSecondsAsync` and `GetTotalForegroundSecondsAsync` overloads accepting `DateTimeOffset from, DateTimeOffset to`
+- `Core/Interfaces/ITrackingEngine.cs` — Add `GetFilteredTotalsAsync(DateTimeOffset from, DateTimeOffset to)` returning per-process filtered seconds
+- `Core/Services/TrackingEngine.cs` — Implement filtered query by delegating to repository
+- `Infrastructure/Data/UsageRepository.cs` — Implement filtered queries: `WHERE session_start >= @from AND session_start < @to`; adjustments filtered by `applied_at`
+- `App/ViewModels/MainViewModel.cs` — Add `SelectedPreset`, `CustomStartDate`, `CustomEndDate` properties; dual refresh logic (in-memory for AllTime, DB query for filtered)
+- `App/ViewModels/ProcessItemViewModel.cs` — Add `FilteredRunningSeconds`, `FilteredForegroundSeconds` properties
+- `App/Views/MainWindow.xaml` — Filter bar between header and DataGrid: preset ComboBox + two DatePickers (visible only for Custom)
+- `App/Resources/Styles.xaml` — ComboBox style for consistency
+
+**Key details**:
+- "All Time" (default) keeps existing 1-second in-memory refresh — no DB queries, no behavior change
+- Filtered ranges query DB; live ranges (Today, This Week) refresh every 5 seconds, past ranges (Yesterday, Last Week) query once on selection
+- Sessions attributed by `session_start` — a session belongs to the day it started
+- Status dots, State column, and Actions remain real-time regardless of filter
+- Filter bar uses existing design system (SurfaceBrush, BorderBrush, CornerRadius)
+
+---
+
 ## Phase 8: Polish & Hardening
 
 **Goal**: Production-quality error handling, logging, settings UI, edge cases.
@@ -306,7 +333,8 @@ Phase 1 (Setup)
                  ├─→ Phase 5 (System Tray)
                  │    └─→ Phase 6 (Auto-start)
                  └─→ Phase 7 (Pause/Resume + Time Edit)
-                      └─→ Phase 8 (Polish)
+                      └─→ Phase 7.5 (Time Range Filtering)
+                           └─→ Phase 8 (Polish)
 ```
 
 ## Verification Plan
@@ -320,6 +348,7 @@ After each phase, verify:
 5. **Phase 5**: Close window → app stays in tray, double-click tray → window reopens, Exit → app shuts down
 6. **Phase 6**: Enable auto-start → reboot → app appears in tray, tracking resumes
 7. **Phase 7**: Pause a process → time stops, resume → time continues; edit time → new total reflects adjustment
+7.5. **Phase 7.5**: Select "Today" preset → times show only today's usage; pick custom range → times reflect that range; switch back to "All Time" → original real-time totals return
 8. **Phase 8**: Kill PostgreSQL → app continues tracking with queue, restart PostgreSQL → data flushes; check logs for proper entries; crash and restart → sessions recovered
 
 ## Complete File Listing
@@ -332,8 +361,8 @@ Directory.Build.props
 
 src/AppsUsageCheck.Core/
     AppsUsageCheck.Core.csproj
-    Models/TrackedProcess.cs, UsageSession.cs, TimeAdjustment.cs, ProcessStatus.cs
-    Enums/TrackingState.cs
+    Models/TrackedProcess.cs, UsageSession.cs, TimeAdjustment.cs, ProcessStatus.cs, TimeRange.cs
+    Enums/TrackingState.cs, TimeRangePreset.cs
     Interfaces/IProcessDetector.cs, IForegroundDetector.cs, IUsageRepository.cs, ITrackingEngine.cs, IAutoStartService.cs
     Services/TrackingEngine.cs, TimeFormatter.cs
 

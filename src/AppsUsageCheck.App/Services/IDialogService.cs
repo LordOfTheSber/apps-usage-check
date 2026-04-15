@@ -1,4 +1,5 @@
 using AppsUsageCheck.App.Models;
+using AppsUsageCheck.Core.Models;
 
 namespace AppsUsageCheck.App.Services;
 
@@ -7,6 +8,12 @@ public interface IDialogService
     Task<AddProcessRequest?> ShowAddProcessDialogAsync(
         IReadOnlyCollection<string> trackedProcessNames,
         CancellationToken cancellationToken = default);
+
+    Task<EditTimeRequest?> ShowEditTimeDialogAsync(
+        ProcessStatus status,
+        CancellationToken cancellationToken = default);
+
+    void ShowSettingsDialog();
 
     bool Confirm(string title, string message);
 

@@ -1,0 +1,73 @@
+<Window
+    x:Class="AppsUsageCheck.App.SettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Settings"
+    Width="520"
+    Height="280"
+    MinWidth="480"
+    MinHeight="260"
+    ResizeMode="NoResize"
+    WindowStartupLocation="CenterOwner">
+  <Grid Margin="24">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="10" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="18" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="20" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <TextBlock
+        FontSize="24"
+        FontWeight="SemiBold"
+        Text="Settings" />
+
+    <TextBlock
+        Grid.Row="2"
+        Foreground="{StaticResource SecondaryTextBrush}"
+        TextWrapping="Wrap"
+        Text="Control how Apps Usage Check starts with Windows. Auto-start launches the app directly into tray mode." />
+
+    <Border
+        Grid.Row="4"
+        Padding="18"
+        Background="{StaticResource SurfaceBrush}"
+        BorderBrush="{StaticResource BorderBrush}"
+        BorderThickness="1"
+        CornerRadius="16">
+      <StackPanel>
+        <CheckBox
+            FontSize="15"
+            FontWeight="SemiBold"
+            IsChecked="{Binding StartWithWindows, Mode=TwoWay}"
+            Content="Start with Windows" />
+        <TextBlock
+            Margin="28,8,0,0"
+            Foreground="{StaticResource SecondaryTextBrush}"
+            TextWrapping="Wrap"
+            Text="When enabled, Windows launches Apps Usage Check with the --minimized flag so tracking resumes without opening the main window." />
+      </StackPanel>
+    </Border>
+
+    <StackPanel
+        Grid.Row="6"
+        HorizontalAlignment="Right"
+        Orientation="Horizontal">
+      <Button
+          Width="90"
+          Margin="0,0,10,0"
+          IsCancel="True"
+          Content="Cancel"
+          Style="{StaticResource SecondaryButtonStyle}" />
+      <Button
+          Width="90"
+          IsDefault="True"
+          Click="OnSaveClick"
+          Content="Save"
+          Style="{StaticResource PrimaryButtonStyle}" />
+    </StackPanel>
+  </Grid>
+</Window>

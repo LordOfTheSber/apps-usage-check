@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AppsUsageCheck.Core\AppsUsageCheck.Core.csproj" />
+    <ProjectReference Include="..\..\src\AppsUsageCheck.Infrastructure\AppsUsageCheck.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>

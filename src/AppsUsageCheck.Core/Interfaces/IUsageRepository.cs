@@ -25,4 +25,16 @@ public interface IUsageRepository
     Task<long> GetTotalRunningSecondsAsync(Guid trackedProcessId, CancellationToken cancellationToken = default);
 
     Task<long> GetTotalForegroundSecondsAsync(Guid trackedProcessId, CancellationToken cancellationToken = default);
+
+    Task<long> GetTotalRunningSecondsAsync(
+        Guid trackedProcessId,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default);
+
+    Task<long> GetTotalForegroundSecondsAsync(
+        Guid trackedProcessId,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default);
 }

@@ -252,6 +252,64 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
         await _usageRepository.UpdateTrackedProcessAsync(trackedProcess, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task ApplyTimeAdjustmentAsync(
+        Guid trackedProcessId,
+        TimeAdjustmentTarget target,
+        long adjustmentSeconds,
+        string? reason = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (adjustmentSeconds == 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(adjustmentSeconds), "Adjustment must be non-zero.");
+        }
+
+        TimeAdjustment adjustment;
+
+        lock (_syncRoot)
+        {
+            var runtime = GetRuntime(trackedProcessId);
+            var currentRunningSeconds = runtime.Status.TotalRunningSeconds;
+            var currentForegroundSeconds = runtime.Status.ForegroundSeconds;
+            var newRunningSeconds = currentRunningSeconds + (target == TimeAdjustmentTarget.Running ? adjustmentSeconds : 0);
+            var newForegroundSeconds = currentForegroundSeconds + (target == TimeAdjustmentTarget.Foreground ? adjustmentSeconds : 0);
+
+            if (newRunningSeconds < 0)
+            {
+                throw new InvalidOperationException("Running time cannot be reduced below zero.");
+            }
+
+            if (newForegroundSeconds < 0)
+            {
+                throw new InvalidOperationException("Foreground time cannot be reduced below zero.");
+            }
+
+            if (newForegroundSeconds > newRunningSeconds)
+            {
+                throw new InvalidOperationException("Foreground time cannot exceed running time.");
+            }
+
+            adjustment = new TimeAdjustment
+            {
+                Id = Guid.NewGuid(),
+                TrackedProcessId = trackedProcessId,
+                AdjustmentType = TimeAdjustmentTypes.ToStorageValue(target),
+                AdjustmentSeconds = adjustmentSeconds,
+                Reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(),
+                AppliedAt = _timeProvider.GetUtcNow(),
+            };
+        }
+
+        await _usageRepository.AddTimeAdjustmentAsync(adjustment, cancellationToken).ConfigureAwait(false);
+
+        lock (_syncRoot)
+        {
+            var runtime = GetRuntime(trackedProcessId);
+            runtime.Status.TotalRunningSeconds += target == TimeAdjustmentTarget.Running ? adjustmentSeconds : 0;
+            runtime.Status.ForegroundSeconds += target == TimeAdjustmentTarget.Foreground ? adjustmentSeconds : 0;
+        }
+    }
+
     public async Task PauseAllTrackingAsync(CancellationToken cancellationToken = default)
     {
         Guid[] trackedProcessIds;
@@ -288,6 +346,43 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             await ResumeTrackingAsync(trackedProcessId, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, UsageTotals>> GetFilteredTotalsAsync(
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default)
+    {
+        if (to <= from)
+        {
+            throw new ArgumentOutOfRangeException(nameof(to), "The time range end must be after the start.");
+        }
+
+        Guid[] trackedProcessIds;
+
+        lock (_syncRoot)
+        {
+            trackedProcessIds = _trackedProcesses.Keys.ToArray();
+        }
+
+        var totals = await Task.WhenAll(
+                trackedProcessIds.Select(
+                    async trackedProcessId =>
+                    {
+                        var runningSeconds = await _usageRepository
+                            .GetTotalRunningSecondsAsync(trackedProcessId, from, to, cancellationToken)
+                            .ConfigureAwait(false);
+                        var foregroundSeconds = await _usageRepository
+                            .GetTotalForegroundSecondsAsync(trackedProcessId, from, to, cancellationToken)
+                            .ConfigureAwait(false);
+
+                        return new KeyValuePair<Guid, UsageTotals>(
+                            trackedProcessId,
+                            new UsageTotals(runningSeconds, foregroundSeconds));
+                    }))
+            .ConfigureAwait(false);
+
+        return totals.ToDictionary(pair => pair.Key, pair => pair.Value);
     }
 
     internal Task ProcessTickAsync(CancellationToken cancellationToken = default)
@@ -373,16 +468,24 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
 
     private async Task ProcessTickCoreAsync(CancellationToken cancellationToken)
     {
-        var runningProcessNames = NormalizeProcessNames(_processDetector.GetRunningProcessNames());
-        var foregroundProcessName = ProcessNameNormalizer.Normalize(_foregroundDetector.GetForegroundProcessName());
-        var now = _timeProvider.GetUtcNow();
-        var shouldFlush = now - _lastFlushAt >= _flushInterval;
-
         List<TrackedProcessRuntime> runtimes;
         lock (_syncRoot)
         {
             runtimes = _trackedProcesses.Values.ToList();
         }
+
+        var activeTargetProcessNames = runtimes
+            .Where(runtime => !runtime.Process.IsPaused)
+            .Select(runtime => runtime.Process.ProcessName)
+            .ToArray();
+        var runningProcessNames = activeTargetProcessNames.Length == 0
+            ? []
+            : NormalizeProcessNames(_processDetector.GetRunningTargetProcessNames(activeTargetProcessNames));
+        var foregroundProcessName = runningProcessNames.Count == 0
+            ? string.Empty
+            : ProcessNameNormalizer.Normalize(_foregroundDetector.GetForegroundProcessName());
+        var now = _timeProvider.GetUtcNow();
+        var shouldFlush = now - _lastFlushAt >= _flushInterval;
 
         foreach (var runtime in runtimes)
         {

@@ -2,6 +2,7 @@
     x:Class="AppsUsageCheck.App.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:coreEnums="clr-namespace:AppsUsageCheck.Core.Enums;assembly=AppsUsageCheck.Core"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Title="Apps Usage Check"
@@ -14,6 +15,9 @@
   <Grid Margin="24">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="16" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="16" />
       <RowDefinition Height="*" />
       <RowDefinition Height="16" />
       <RowDefinition Height="Auto" />
@@ -66,7 +70,79 @@
       </Grid>
     </Border>
 
-    <Grid Grid.Row="1">
+    <Border
+        Grid.Row="2"
+        Padding="18,14"
+        Background="{StaticResource SurfaceBrush}"
+        BorderBrush="{StaticResource BorderBrush}"
+        BorderThickness="1"
+        CornerRadius="14">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="220" />
+          <ColumnDefinition Width="16" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="180" />
+          <ColumnDefinition Width="12" />
+          <ColumnDefinition Width="180" />
+          <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <TextBlock
+            VerticalAlignment="Center"
+            FontWeight="SemiBold"
+            Text="Time Range" />
+
+        <ComboBox
+            Grid.Column="1"
+            Margin="12,0,0,0"
+            SelectedValue="{Binding SelectedPreset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            SelectedValuePath="Tag"
+            Style="{StaticResource FilterComboBoxStyle}">
+          <ComboBoxItem Content="All Time" Tag="{x:Static coreEnums:TimeRangePreset.AllTime}" />
+          <ComboBoxItem Content="Today" Tag="{x:Static coreEnums:TimeRangePreset.Today}" />
+          <ComboBoxItem Content="Yesterday" Tag="{x:Static coreEnums:TimeRangePreset.Yesterday}" />
+          <ComboBoxItem Content="Last 3 Days" Tag="{x:Static coreEnums:TimeRangePreset.Last3Days}" />
+          <ComboBoxItem Content="Last 7 Days" Tag="{x:Static coreEnums:TimeRangePreset.Last7Days}" />
+          <ComboBoxItem Content="Last 14 Days" Tag="{x:Static coreEnums:TimeRangePreset.Last14Days}" />
+          <ComboBoxItem Content="Last 30 Days" Tag="{x:Static coreEnums:TimeRangePreset.Last30Days}" />
+          <ComboBoxItem Content="This Week" Tag="{x:Static coreEnums:TimeRangePreset.ThisWeek}" />
+          <ComboBoxItem Content="Last Week" Tag="{x:Static coreEnums:TimeRangePreset.LastWeek}" />
+          <ComboBoxItem Content="This Month" Tag="{x:Static coreEnums:TimeRangePreset.ThisMonth}" />
+          <ComboBoxItem Content="Last Month" Tag="{x:Static coreEnums:TimeRangePreset.LastMonth}" />
+          <ComboBoxItem Content="Custom" Tag="{x:Static coreEnums:TimeRangePreset.Custom}" />
+        </ComboBox>
+
+        <TextBlock
+            Grid.Column="3"
+            VerticalAlignment="Center"
+            FontWeight="SemiBold"
+            Text="From"
+            Visibility="{Binding IsCustomRangeSelected, Converter={StaticResource BoolToVisibilityConverter}}" />
+
+        <DatePicker
+            Grid.Column="4"
+            SelectedDate="{Binding CustomStartDate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            SelectedDateFormat="Short"
+            Visibility="{Binding IsCustomRangeSelected, Converter={StaticResource BoolToVisibilityConverter}}" />
+
+        <DatePicker
+            Grid.Column="6"
+            SelectedDate="{Binding CustomEndDate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            SelectedDateFormat="Short"
+            Visibility="{Binding IsCustomRangeSelected, Converter={StaticResource BoolToVisibilityConverter}}" />
+
+        <TextBlock
+            Grid.Column="7"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Center"
+            Foreground="{StaticResource SecondaryTextBrush}"
+            Text="Running status stays live; filtered totals refresh from persisted history." />
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="4">
       <Border
           Background="{StaticResource SurfaceBrush}"
           BorderBrush="{StaticResource BorderBrush}"
@@ -81,6 +157,26 @@
             ScrollViewer.CanContentScroll="True"
             VirtualizingPanel.IsVirtualizing="True"
             VirtualizingPanel.VirtualizationMode="Recycling">
+          <DataGrid.RowStyle>
+            <Style TargetType="DataGridRow">
+              <Setter Property="ContextMenu">
+                <Setter.Value>
+                  <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                    <MenuItem
+                        Command="{Binding TogglePauseCommand}"
+                        Header="{Binding ActionText}" />
+                    <MenuItem
+                        Command="{Binding EditTimeCommand}"
+                        Header="Edit Time" />
+                    <Separator />
+                    <MenuItem
+                        Command="{Binding RemoveCommand}"
+                        Header="Remove" />
+                  </ContextMenu>
+                </Setter.Value>
+              </Setter>
+            </Style>
+          </DataGrid.RowStyle>
           <DataGrid.Columns>
             <DataGridTemplateColumn Width="56" Header="">
               <DataGridTemplateColumn.CellTemplate>
@@ -136,11 +232,11 @@
 
             <DataGridTextColumn
                 Width="1.1*"
-                Binding="{Binding TotalRunningSeconds, Converter={StaticResource SecondsToTimeStringConverter}}"
+                Binding="{Binding DisplayedRunningSeconds, Converter={StaticResource SecondsToTimeStringConverter}}"
                 Header="Running Time" />
             <DataGridTextColumn
                 Width="1.1*"
-                Binding="{Binding ForegroundSeconds, Converter={StaticResource SecondsToTimeStringConverter}}"
+                Binding="{Binding DisplayedForegroundSeconds, Converter={StaticResource SecondsToTimeStringConverter}}"
                 Header="Foreground Time" />
 
             <DataGridTemplateColumn Width="220" Header="Actions">
@@ -190,7 +286,7 @@
     </Grid>
 
     <Border
-        Grid.Row="2"
+        Grid.Row="6"
         Padding="18,14"
         Background="{StaticResource SurfaceBrush}"
         BorderBrush="{StaticResource BorderBrush}"
