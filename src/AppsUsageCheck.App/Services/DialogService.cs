@@ -10,11 +10,16 @@ public sealed class DialogService : IDialogService
 {
     private readonly IProcessDetector _processDetector;
     private readonly IAutoStartService _autoStartService;
+    private readonly IAppSettingsStore _appSettingsStore;
 
-    public DialogService(IProcessDetector processDetector, IAutoStartService autoStartService)
+    public DialogService(
+        IProcessDetector processDetector,
+        IAutoStartService autoStartService,
+        IAppSettingsStore appSettingsStore)
     {
         _processDetector = processDetector ?? throw new ArgumentNullException(nameof(processDetector));
         _autoStartService = autoStartService ?? throw new ArgumentNullException(nameof(autoStartService));
+        _appSettingsStore = appSettingsStore ?? throw new ArgumentNullException(nameof(appSettingsStore));
     }
 
     public Task<AddProcessRequest?> ShowAddProcessDialogAsync(
@@ -52,7 +57,7 @@ public sealed class DialogService : IDialogService
 
     public void ShowSettingsDialog()
     {
-        var viewModel = new SettingsViewModel(_autoStartService);
+        var viewModel = new SettingsViewModel(_autoStartService, _appSettingsStore);
         var dialog = new SettingsWindow(viewModel)
         {
             Owner = GetOwnerWindow(),

@@ -1,14 +1,19 @@
+using System.IO;
 using System.Windows;
 using AppsUsageCheck.Core.Interfaces;
 using AppsUsageCheck.Core.Services;
 using AppsUsageCheck.Infrastructure;
 using AppsUsageCheck.Infrastructure.Data;
+using AppsUsageCheck.Infrastructure.Services;
 using AppsUsageCheck.App.Services;
 using AppsUsageCheck.App.ViewModels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Events;
 
 namespace AppsUsageCheck.App;
 
@@ -18,8 +23,10 @@ public partial class App : Application
     private IHost? _host;
     private ITrackingEngine? _trackingEngine;
     private ITrayIconService? _trayIconService;
+    private IDatabaseHealthCheck? _databaseHealthCheck;
     private Mutex? _singleInstanceMutex;
     private bool _ownsSingleInstanceMutex;
+    private bool _globalExceptionHandlersRegistered;
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -34,10 +41,14 @@ public partial class App : Application
         try
         {
             _host = CreateHostBuilder(e.Args).Build();
+            RegisterGlobalExceptionHandlers();
             await ApplyDatabaseMigrationsAsync(_host.Services).ConfigureAwait(true);
             await _host.StartAsync().ConfigureAwait(true);
+            _databaseHealthCheck = _host.Services.GetRequiredService<IDatabaseHealthCheck>();
+            await _databaseHealthCheck.StartAsync().ConfigureAwait(true);
             _trackingEngine = _host.Services.GetRequiredService<ITrackingEngine>();
             await _trackingEngine.StartAsync().ConfigureAwait(true);
+            _host.Services.GetRequiredService<ILogger<App>>().LogInformation("Apps Usage Check started.");
 
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
             MainWindow = _host.Services.GetRequiredService<MainWindow>();
@@ -57,6 +68,7 @@ public partial class App : Application
         }
         catch (Exception exception)
         {
+            Log.Fatal(exception, "Application startup failed.");
             MessageBox.Show(
                 $"Application startup failed.{Environment.NewLine}{Environment.NewLine}{exception.Message}",
                 "AppsUsageCheck",
@@ -71,6 +83,8 @@ public partial class App : Application
     {
         try
         {
+            _host?.Services.GetService<ILogger<App>>()?.LogInformation("Apps Usage Check is shutting down.");
+
             if (_trayIconService is IDisposable disposableTrayIconService)
             {
                 disposableTrayIconService.Dispose();
@@ -80,6 +94,11 @@ public partial class App : Application
             if (_trackingEngine is not null)
             {
                 await _trackingEngine.StopAsync().ConfigureAwait(true);
+            }
+
+            if (_databaseHealthCheck is not null)
+            {
+                await _databaseHealthCheck.StopAsync().ConfigureAwait(true);
             }
 
             if (_host is not null)
@@ -96,7 +115,9 @@ public partial class App : Application
         }
         finally
         {
+            UnregisterGlobalExceptionHandlers();
             ReleaseSingleInstanceMutex();
+            Log.CloseAndFlush();
         }
 
         base.OnExit(e);
@@ -115,6 +136,11 @@ public partial class App : Application
                         .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
                         .AddEnvironmentVariables(prefix: "APPS_USAGE_CHECK_");
                 })
+            .UseSerilog(
+                (context, _, loggerConfiguration) =>
+                {
+                    ConfigureSerilog(context.Configuration, loggerConfiguration);
+                })
             .ConfigureServices(
                 (context, services) =>
                 {
@@ -126,6 +152,7 @@ public partial class App : Application
 
                     services.AddSingleton(TimeProvider.System);
                     services.AddInfrastructure(connectionString);
+                    services.AddSingleton<IAppSettingsStore, JsonAppSettingsStore>();
                     services.AddSingleton<IDialogService, DialogService>();
                     services.AddSingleton<MainViewModel>();
                     services.AddSingleton<MainWindow>();
@@ -135,6 +162,7 @@ public partial class App : Application
                         {
                             var pollingIntervalMilliseconds = context.Configuration.GetValue<int?>("Tracking:PollingIntervalMs") ?? 1000;
                             var flushIntervalSeconds = context.Configuration.GetValue<int?>("Tracking:FlushIntervalSeconds") ?? 30;
+                            var logger = serviceProvider.GetRequiredService<ILogger<TrackingEngine>>();
 
                             return new TrackingEngine(
                                 serviceProvider.GetRequiredService<IProcessDetector>(),
@@ -142,7 +170,8 @@ public partial class App : Application
                                 serviceProvider.GetRequiredService<IUsageRepository>(),
                                 TimeSpan.FromMilliseconds(pollingIntervalMilliseconds),
                                 TimeSpan.FromSeconds(flushIntervalSeconds),
-                                serviceProvider.GetRequiredService<TimeProvider>());
+                                serviceProvider.GetRequiredService<TimeProvider>(),
+                                errorHandler: exception => logger.LogError(exception, "Tracking tick failed."));
                         });
                 });
     }
@@ -157,6 +186,37 @@ public partial class App : Application
     private static bool ShouldStartMinimized(IEnumerable<string> args)
     {
         return args.Any(arg => string.Equals(arg, "--minimized", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void ConfigureSerilog(IConfiguration configuration, LoggerConfiguration loggerConfiguration)
+    {
+        var minimumLevel = ParseMinimumLevel(configuration["Logging:MinimumLevel"]);
+        var logDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
+        Directory.CreateDirectory(logDirectory);
+
+        loggerConfiguration
+            .MinimumLevel.Is(minimumLevel)
+            .Enrich.FromLogContext()
+            .WriteTo.Console()
+            .WriteTo.File(
+                Path.Combine(logDirectory, "app-.log"),
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 7,
+                rollOnFileSizeLimit: true,
+                fileSizeLimitBytes: 10 * 1024 * 1024);
+    }
+
+    private static LogEventLevel ParseMinimumLevel(string? configuredLevel)
+    {
+        return configuredLevel?.Trim().ToLowerInvariant() switch
+        {
+            "verbose" => LogEventLevel.Verbose,
+            "debug" => LogEventLevel.Debug,
+            "warning" => LogEventLevel.Warning,
+            "error" => LogEventLevel.Error,
+            "fatal" => LogEventLevel.Fatal,
+            _ => LogEventLevel.Information,
+        };
     }
 
     private bool TryAcquireSingleInstance(IEnumerable<string> args)
@@ -206,5 +266,60 @@ public partial class App : Application
             _singleInstanceMutex = null;
             _ownsSingleInstanceMutex = false;
         }
+    }
+
+    private void RegisterGlobalExceptionHandlers()
+    {
+        if (_globalExceptionHandlersRegistered)
+        {
+            return;
+        }
+
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnCurrentDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+        _globalExceptionHandlersRegistered = true;
+    }
+
+    private void UnregisterGlobalExceptionHandlers()
+    {
+        if (!_globalExceptionHandlersRegistered)
+        {
+            return;
+        }
+
+        DispatcherUnhandledException -= OnDispatcherUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException -= OnCurrentDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
+        _globalExceptionHandlersRegistered = false;
+    }
+
+    private void OnDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        Log.Error(e.Exception, "Unhandled dispatcher exception.");
+        MessageBox.Show(
+            $"An unexpected error occurred.{Environment.NewLine}{Environment.NewLine}{e.Exception.Message}",
+            "AppsUsageCheck",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
+        e.Handled = true;
+    }
+
+    private void OnCurrentDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
+    {
+        if (e.ExceptionObject is Exception exception)
+        {
+            Log.Fatal(exception, "Unhandled application exception.");
+        }
+        else
+        {
+            Log.Fatal("Unhandled application exception of unknown type.");
+        }
+    }
+
+    private void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        Log.Error(e.Exception, "Unobserved task exception.");
+        e.SetObserved();
     }
 }

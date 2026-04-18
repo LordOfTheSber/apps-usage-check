@@ -4,6 +4,7 @@ using AppsUsageCheck.App.Services;
 using AppsUsageCheck.Core.Enums;
 using AppsUsageCheck.Core.Interfaces;
 using AppsUsageCheck.Core.Models;
+using AppsUsageCheck.Infrastructure.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -16,6 +17,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly ITrackingEngine _trackingEngine;
     private readonly IDialogService _dialogService;
     private readonly TimeProvider _timeProvider;
+    private readonly IDatabaseHealthCheck _databaseHealthCheck;
     private readonly DispatcherTimer _refreshTimer;
     private readonly Dictionary<Guid, ProcessItemViewModel> _itemsById = [];
     private readonly HashSet<Guid> _filteredTotalsProcessIds = [];
@@ -44,11 +46,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private DateTime? customEndDate;
 
-    public MainViewModel(ITrackingEngine trackingEngine, IDialogService dialogService, TimeProvider timeProvider)
+    [ObservableProperty]
+    private DatabaseConnectionState databaseConnectionState;
+
+    [ObservableProperty]
+    private string databaseStatusText = "Database status pending...";
+
+    public MainViewModel(
+        ITrackingEngine trackingEngine,
+        IDialogService dialogService,
+        TimeProvider timeProvider,
+        IDatabaseHealthCheck databaseHealthCheck)
     {
         _trackingEngine = trackingEngine ?? throw new ArgumentNullException(nameof(trackingEngine));
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _databaseHealthCheck = databaseHealthCheck ?? throw new ArgumentNullException(nameof(databaseHealthCheck));
 
         var today = _timeProvider.GetLocalNow().Date;
 
@@ -69,6 +82,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             Interval = TimeSpan.FromSeconds(1),
         };
         _refreshTimer.Tick += OnRefreshTimerTick;
+        UpdateDatabaseStatus();
     }
 
     public event EventHandler? ExitRequested;
@@ -107,6 +121,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         _isInitialized = true;
+        UpdateDatabaseStatus();
         await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
         _refreshTimer.Start();
     }
@@ -300,6 +315,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         try
         {
+            UpdateDatabaseStatus();
             var nowLocal = _timeProvider.GetLocalNow();
             var statuses = _trackingEngine.GetAllStatuses()
                 .OrderBy(status => status.DisplayName ?? status.ProcessName, StringComparer.OrdinalIgnoreCase)
@@ -466,6 +482,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnRefreshTimerTick(object? sender, EventArgs e)
     {
+        UpdateDatabaseStatus();
         RequestRefresh();
     }
 
@@ -557,5 +574,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool CanResumeAll()
     {
         return Processes.Any(process => process.IsPaused);
+    }
+
+    private void UpdateDatabaseStatus()
+    {
+        DatabaseConnectionState = _databaseHealthCheck.ConnectionState;
+        DatabaseStatusText = _databaseHealthCheck.StatusText;
     }
 }

@@ -25,6 +25,7 @@
   <conv:SecondsToTimeStringConverter x:Key="SecondsToTimeStringConverter" />
   <conv:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
   <conv:ProcessItemStatusBrushConverter x:Key="ProcessItemStatusBrushConverter" />
+  <conv:ConnectionStatusBrushConverter x:Key="ConnectionStatusBrushConverter" />
 
   <Style TargetType="Window">
     <Setter Property="Background" Value="{StaticResource WindowBackgroundBrush}" />

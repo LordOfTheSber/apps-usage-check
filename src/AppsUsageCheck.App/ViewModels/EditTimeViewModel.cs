@@ -2,6 +2,7 @@ using AppsUsageCheck.App.Converters;
 using AppsUsageCheck.App.Models;
 using AppsUsageCheck.Core.Enums;
 using AppsUsageCheck.Core.Models;
+using AppsUsageCheck.Core.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace AppsUsageCheck.App.ViewModels;
@@ -160,7 +161,7 @@ public sealed class EditTimeViewModel : ObservableObject
             }
 
             var prefix = SelectedOperationOption.IsSubtract ? "-" : "+";
-            return prefix + SecondsToTimeStringConverter.FormatSeconds(magnitudeSeconds);
+            return prefix + TimeFormatter.FormatDuration(magnitudeSeconds);
         }
     }
 

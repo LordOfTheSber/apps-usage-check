@@ -115,8 +115,9 @@ public sealed class TrackingEngineTests
         Assert.Null(createdSession.SessionEnd);
 
         Assert.Equal(0, processDetector.GetRunningProcessNamesCallCount);
-        Assert.Single(processDetector.TargetLookupRequests);
+        Assert.Equal(2, processDetector.TargetLookupRequests.Count);
         Assert.Equal(["code"], processDetector.TargetLookupRequests[0]);
+        Assert.Equal(["code"], processDetector.TargetLookupRequests[1]);
         Assert.Equal(1, foregroundDetector.GetForegroundProcessNameCallCount);
     }
 
@@ -158,8 +159,9 @@ public sealed class TrackingEngineTests
         await engine.ProcessTickAsync();
 
         Assert.Equal(0, processDetector.GetRunningProcessNamesCallCount);
-        Assert.Single(processDetector.TargetLookupRequests);
+        Assert.Equal(2, processDetector.TargetLookupRequests.Count);
         Assert.Equal(["chrome"], processDetector.TargetLookupRequests[0]);
+        Assert.Equal(["chrome"], processDetector.TargetLookupRequests[1]);
 
         var statuses = engine.GetAllStatuses()
             .OrderBy(status => status.ProcessName, StringComparer.Ordinal)
@@ -774,6 +776,138 @@ public sealed class TrackingEngineTests
         Assert.Empty(repository.AddedSessions);
     }
 
+    [Fact]
+    public async Task StartAsync_OpenSessionForStoppedProcess_ClosesItDuringRecovery()
+    {
+        var now = new DateTimeOffset(2026, 4, 14, 17, 0, 0, TimeSpan.Zero);
+        var timeProvider = new FakeTimeProvider(now);
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "code",
+        };
+        var openSession = new UsageSession
+        {
+            Id = Guid.NewGuid(),
+            TrackedProcessId = trackedProcess.Id,
+            SessionStart = now.AddMinutes(-5),
+            TotalRunningSeconds = 120,
+            ForegroundSeconds = 60,
+            CreatedAt = now.AddMinutes(-5),
+            UpdatedAt = now.AddMinutes(-1),
+        };
+
+        var repository = new FakeUsageRepository(
+            [trackedProcess],
+            totalRunningSeconds: new Dictionary<Guid, long> { [trackedProcess.Id] = 120 },
+            totalForegroundSeconds: new Dictionary<Guid, long> { [trackedProcess.Id] = 60 },
+            usageSessions: [openSession]);
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30),
+            timeProvider: timeProvider);
+
+        await engine.StartAsync();
+
+        var recoveredSession = Assert.Single(repository.UpdatedSessions);
+        Assert.Equal(openSession.Id, recoveredSession.Id);
+        Assert.Equal(now, recoveredSession.SessionEnd);
+
+        var status = Assert.Single(engine.GetAllStatuses());
+        Assert.Null(status.CurrentSessionStart);
+        Assert.False(status.IsRunning);
+        Assert.False(status.IsForeground);
+        Assert.Equal(120, status.TotalRunningSeconds);
+        Assert.Equal(60, status.ForegroundSeconds);
+    }
+
+    [Fact]
+    public async Task StartAsync_OpenSessionForRunningProcess_KeepsSessionOpen()
+    {
+        var now = new DateTimeOffset(2026, 4, 14, 17, 30, 0, TimeSpan.Zero);
+        var timeProvider = new FakeTimeProvider(now);
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "code",
+        };
+        var openSession = new UsageSession
+        {
+            Id = Guid.NewGuid(),
+            TrackedProcessId = trackedProcess.Id,
+            SessionStart = now.AddMinutes(-5),
+            TotalRunningSeconds = 120,
+            ForegroundSeconds = 60,
+            CreatedAt = now.AddMinutes(-5),
+            UpdatedAt = now.AddMinutes(-1),
+        };
+
+        var repository = new FakeUsageRepository(
+            [trackedProcess],
+            totalRunningSeconds: new Dictionary<Guid, long> { [trackedProcess.Id] = 120 },
+            totalForegroundSeconds: new Dictionary<Guid, long> { [trackedProcess.Id] = 60 },
+            usageSessions: [openSession]);
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "code.exe" });
+        var foregroundDetector = new FakeForegroundDetector("code.exe");
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30),
+            timeProvider: timeProvider);
+
+        await engine.StartAsync();
+        await engine.ProcessTickAsync();
+
+        Assert.Empty(repository.UpdatedSessions);
+
+        var status = Assert.Single(engine.GetAllStatuses());
+        Assert.Equal(openSession.SessionStart, status.CurrentSessionStart);
+        Assert.Equal(121, status.TotalRunningSeconds);
+        Assert.Equal(61, status.ForegroundSeconds);
+        Assert.Equal(121, status.CurrentSessionRunningSeconds);
+        Assert.Equal(61, status.CurrentSessionForegroundSeconds);
+        Assert.True(status.IsRunning);
+        Assert.True(status.IsForeground);
+    }
+
+    [Fact]
+    public async Task ProcessTickAsync_WhenDetectorThrows_InvokesErrorHandlerWithoutThrowing()
+    {
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "code",
+        };
+
+        var repository = new FakeUsageRepository([trackedProcess]);
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+        var exceptions = new List<Exception>();
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30),
+                errorHandler: exceptions.Add);
+
+        await engine.StartAsync();
+        processDetector.TargetLookupException = new InvalidOperationException("target lookup failed");
+        await engine.ProcessTickAsync();
+
+        var exception = Assert.Single(exceptions);
+        Assert.Equal("target lookup failed", exception.Message);
+    }
+
     private sealed class FakeProcessDetector : IProcessDetector
     {
         private IReadOnlySet<string> _processes;
@@ -787,6 +921,8 @@ public sealed class TrackingEngineTests
 
         public List<string[]> TargetLookupRequests { get; } = [];
 
+        public Exception? TargetLookupException { get; set; }
+
         public IReadOnlySet<string> GetRunningProcessNames()
         {
             GetRunningProcessNamesCallCount++;
@@ -796,6 +932,10 @@ public sealed class TrackingEngineTests
         public IReadOnlySet<string> GetRunningTargetProcessNames(IEnumerable<string> targetProcessNames)
         {
             ArgumentNullException.ThrowIfNull(targetProcessNames);
+            if (TargetLookupException is not null)
+            {
+                throw TargetLookupException;
+            }
 
             var normalizedTargets = targetProcessNames
                 .Select(ProcessNameNormalizer.Normalize)
@@ -945,6 +1085,16 @@ public sealed class TrackingEngineTests
         {
             _trackedProcesses.Remove(trackedProcessId);
             return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<UsageSession>> GetOpenSessionsAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<UsageSession>>(
+                _sessionsById.Values
+                    .Where(session => session.SessionEnd is null)
+                    .Select(CloneUsageSession)
+                    .OrderByDescending(session => session.SessionStart)
+                    .ToArray());
         }
 
         public Task<UsageSession?> GetOpenSessionAsync(Guid trackedProcessId, CancellationToken cancellationToken = default)

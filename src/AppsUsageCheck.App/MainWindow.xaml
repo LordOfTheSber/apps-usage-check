@@ -319,6 +319,23 @@
               BorderBrush="{StaticResource BorderBrush}"
               BorderThickness="1"
               CornerRadius="10">
+            <StackPanel Orientation="Horizontal">
+              <Ellipse
+                  Width="10"
+                  Height="10"
+                  Margin="0,0,8,0"
+                  VerticalAlignment="Center"
+                  Fill="{Binding DatabaseConnectionState, Converter={StaticResource ConnectionStatusBrushConverter}}" />
+              <TextBlock Text="{Binding DatabaseStatusText}" />
+            </StackPanel>
+          </Border>
+          <Border
+              Margin="0,0,10,0"
+              Padding="10,4"
+              Background="{StaticResource SurfaceAltBrush}"
+              BorderBrush="{StaticResource BorderBrush}"
+              BorderThickness="1"
+              CornerRadius="10">
             <TextBlock Text="{Binding TrackedProcessCount, StringFormat=Tracked: {0}}" />
           </Border>
           <Border

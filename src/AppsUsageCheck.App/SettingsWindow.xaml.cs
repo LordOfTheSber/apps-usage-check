@@ -16,10 +16,15 @@ public partial class SettingsWindow : Window
 
     private void OnSaveClick(object sender, RoutedEventArgs e)
     {
-        if (!ViewModel.TrySave(out var errorMessage))
+        if (!ViewModel.TrySave(out var errorMessage, out var infoMessage))
         {
             MessageBox.Show(this, errorMessage, "Settings", MessageBoxButton.OK, MessageBoxImage.Error);
             return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(infoMessage))
+        {
+            MessageBox.Show(this, infoMessage, "Settings", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         DialogResult = true;

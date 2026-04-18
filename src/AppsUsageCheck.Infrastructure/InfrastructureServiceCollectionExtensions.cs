@@ -32,6 +32,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddSingleton<IProcessDetector, Win32ProcessDetector>();
         services.AddSingleton<IForegroundDetector, Win32ForegroundDetector>();
         services.AddSingleton<IAutoStartService, AutoStartService>();
+        services.AddSingleton<IDatabaseHealthCheck, DatabaseHealthCheck>();
 
         return services;
     }

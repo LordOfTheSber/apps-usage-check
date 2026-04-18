@@ -14,6 +14,8 @@ public interface IUsageRepository
 
     Task RemoveTrackedProcessAsync(Guid trackedProcessId, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<UsageSession>> GetOpenSessionsAsync(CancellationToken cancellationToken = default);
+
     Task<UsageSession?> GetOpenSessionAsync(Guid trackedProcessId, CancellationToken cancellationToken = default);
 
     Task AddUsageSessionAsync(UsageSession session, CancellationToken cancellationToken = default);

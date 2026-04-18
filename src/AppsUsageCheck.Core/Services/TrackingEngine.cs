@@ -398,7 +398,26 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
     private async Task LoadTrackedProcessesAsync(CancellationToken cancellationToken)
     {
         var trackedProcesses = await _usageRepository.GetTrackedProcessesAsync(cancellationToken).ConfigureAwait(false);
+        var openSessions = await _usageRepository.GetOpenSessionsAsync(cancellationToken).ConfigureAwait(false);
+        var openSessionsByTrackedProcessId = openSessions
+            .GroupBy(session => session.TrackedProcessId)
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .OrderByDescending(session => session.SessionStart)
+                    .Select(CloneUsageSession)
+                    .First());
+        var activeTargetProcessNames = trackedProcesses
+            .Where(trackedProcess => !trackedProcess.IsPaused)
+            .Select(trackedProcess => ProcessNameNormalizer.Normalize(trackedProcess.ProcessName))
+            .Where(processName => processName.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var runningProcessNames = activeTargetProcessNames.Length == 0
+            ? []
+            : NormalizeProcessNames(_processDetector.GetRunningTargetProcessNames(activeTargetProcessNames));
         var runtimes = new List<TrackedProcessRuntime>(trackedProcesses.Count);
+        var now = _timeProvider.GetUtcNow();
 
         foreach (var trackedProcess in trackedProcesses)
         {
@@ -408,7 +427,16 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
 
             var totalRunningSeconds = await _usageRepository.GetTotalRunningSecondsAsync(normalizedTrackedProcess.Id, cancellationToken).ConfigureAwait(false);
             var foregroundSeconds = await _usageRepository.GetTotalForegroundSecondsAsync(normalizedTrackedProcess.Id, cancellationToken).ConfigureAwait(false);
-            var openSession = await _usageRepository.GetOpenSessionAsync(normalizedTrackedProcess.Id, cancellationToken).ConfigureAwait(false);
+            openSessionsByTrackedProcessId.TryGetValue(normalizedTrackedProcess.Id, out var openSession);
+
+            if (openSession is not null
+                && (normalizedTrackedProcess.IsPaused || !runningProcessNames.Contains(normalizedTrackedProcess.ProcessName)))
+            {
+                openSession.SessionEnd = now;
+                openSession.UpdatedAt = now;
+                await _usageRepository.UpdateUsageSessionAsync(CloneUsageSession(openSession), cancellationToken).ConfigureAwait(false);
+                openSession = null;
+            }
 
             var status = new ProcessStatus
             {

@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using AppsUsageCheck.Core.Interfaces;
 using AppsUsageCheck.Core.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using Polly;
 
@@ -10,19 +11,32 @@ namespace AppsUsageCheck.Infrastructure.Data;
 public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
 {
     private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
+    private readonly ILogger<UsageRepository> _logger;
     private readonly IAsyncPolicy _databaseRetryPolicy;
     private readonly Channel<QueuedWrite> _writeQueue;
     private readonly CancellationTokenSource _queueCancellationTokenSource = new();
     private readonly Task _queueDrainTask;
 
-    public UsageRepository(IDbContextFactory<AppDbContext> dbContextFactory)
+    public UsageRepository(
+        IDbContextFactory<AppDbContext> dbContextFactory,
+        ILogger<UsageRepository> logger)
     {
         _dbContextFactory = dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _databaseRetryPolicy = Policy
             .Handle<NpgsqlException>(static exception => exception.IsTransient)
             .WaitAndRetryAsync(
                 retryCount: 3,
-                sleepDurationProvider: static attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt - 1)));
+                sleepDurationProvider: static attempt => TimeSpan.FromSeconds(Math.Pow(2, attempt - 1)),
+                onRetryAsync: (exception, delay, retryAttempt, _) =>
+                {
+                    _logger.LogWarning(
+                        exception,
+                        "Retrying database operation in {DelaySeconds} second(s). Attempt {RetryAttempt}.",
+                        delay.TotalSeconds,
+                        retryAttempt);
+                    return Task.CompletedTask;
+                });
 
         _writeQueue = Channel.CreateUnbounded<QueuedWrite>(new UnboundedChannelOptions
         {
@@ -70,6 +84,7 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
             {
                 await dbContext.TrackedProcesses.AddAsync(trackedProcessCopy, ct).ConfigureAwait(false);
             },
+            onSucceeded: null,
             cancellationToken);
     }
 
@@ -83,6 +98,7 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
                 dbContext.TrackedProcesses.Update(trackedProcessCopy);
                 return Task.CompletedTask;
             },
+            onSucceeded: null,
             cancellationToken);
     }
 
@@ -100,6 +116,24 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
                 {
                     dbContext.TrackedProcesses.Remove(trackedProcess);
                 }
+            },
+            onSucceeded: null,
+            cancellationToken);
+    }
+
+    public Task<IReadOnlyList<UsageSession>> GetOpenSessionsAsync(CancellationToken cancellationToken = default)
+    {
+        return ExecuteReadAsync(
+            static async (dbContext, ct) =>
+            {
+                var openSessions = await dbContext.UsageSessions
+                    .AsNoTracking()
+                    .Where(session => session.SessionEnd == null)
+                    .OrderByDescending(session => session.SessionStart)
+                    .ToArrayAsync(ct)
+                    .ConfigureAwait(false);
+
+                return (IReadOnlyList<UsageSession>)openSessions;
             },
             cancellationToken);
     }
@@ -125,6 +159,10 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
             {
                 await dbContext.UsageSessions.AddAsync(sessionCopy, ct).ConfigureAwait(false);
             },
+            () => _logger.LogInformation(
+                "Created usage session {SessionId} for tracked process {TrackedProcessId}.",
+                sessionCopy.Id,
+                sessionCopy.TrackedProcessId),
             cancellationToken);
     }
 
@@ -138,6 +176,23 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
                 dbContext.UsageSessions.Update(sessionCopy);
                 return Task.CompletedTask;
             },
+            () =>
+            {
+                if (sessionCopy.SessionEnd.HasValue)
+                {
+                    _logger.LogInformation(
+                        "Closed usage session {SessionId} for tracked process {TrackedProcessId}.",
+                        sessionCopy.Id,
+                        sessionCopy.TrackedProcessId);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Flushed open usage session {SessionId} for tracked process {TrackedProcessId}.",
+                        sessionCopy.Id,
+                        sessionCopy.TrackedProcessId);
+                }
+            },
             cancellationToken);
     }
 
@@ -150,6 +205,7 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
             {
                 await dbContext.TimeAdjustments.AddAsync(adjustmentCopy, ct).ConfigureAwait(false);
             },
+            onSucceeded: null,
             cancellationToken);
     }
 
@@ -316,9 +372,10 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
     private async Task ExecuteWriteAsync(
         string operationName,
         Func<AppDbContext, CancellationToken, Task> operation,
+        Action? onSucceeded,
         CancellationToken cancellationToken)
     {
-        var queuedWrite = new QueuedWrite(operationName, operation);
+        var queuedWrite = new QueuedWrite(operationName, operation, onSucceeded);
 
         try
         {
@@ -326,6 +383,7 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
         }
         catch (NpgsqlException exception) when (exception.IsTransient)
         {
+            _logger.LogError(exception, "Database write '{OperationName}' failed after retries and was queued.", operationName);
             await _writeQueue.Writer.WriteAsync(queuedWrite, cancellationToken).ConfigureAwait(false);
         }
     }
@@ -338,6 +396,7 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
                     await using var dbContext = await _dbContextFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
                     await queuedWrite.ExecuteAsync(dbContext, ct).ConfigureAwait(false);
                     await dbContext.SaveChangesAsync(ct).ConfigureAwait(false);
+                    queuedWrite.OnSucceeded?.Invoke();
                 },
                 cancellationToken)
             .ConfigureAwait(false);
@@ -365,11 +424,17 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
             try
             {
                 await PersistWriteAsync(queuedWrite, cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Queued database write '{OperationName}' flushed successfully.", queuedWrite.OperationName);
                 return;
             }
             catch (NpgsqlException exception) when (exception.IsTransient)
             {
                 retryAttempt++;
+                _logger.LogWarning(
+                    exception,
+                    "Queued database write '{OperationName}' is still failing. Retry cycle {RetryAttempt}.",
+                    queuedWrite.OperationName,
+                    retryAttempt);
                 var delay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, retryAttempt)));
                 await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
             }
@@ -429,5 +494,6 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
 
     private sealed record QueuedWrite(
         string OperationName,
-        Func<AppDbContext, CancellationToken, Task> ExecuteAsync);
+        Func<AppDbContext, CancellationToken, Task> ExecuteAsync,
+        Action? OnSucceeded);
 }

@@ -23,3 +23,4 @@
 - When changing behavior, update or add tests if the change is testable.
 - PostgreSQL default DB name is `apps_usage_check`; app startup applies pending EF Core migrations automatically.
 - Auto-start uses `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` and launches with `--minimized`.
+- Settings changes for polling interval, flush interval, connection string, and log level are written to the app's `appsettings.json`; those changes take effect after restart.

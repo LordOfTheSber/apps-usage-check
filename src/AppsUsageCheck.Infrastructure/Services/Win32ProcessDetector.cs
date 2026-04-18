@@ -1,11 +1,20 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using AppsUsageCheck.Core.Interfaces;
 using AppsUsageCheck.Core.Services;
+using Microsoft.Extensions.Logging;
 
 namespace AppsUsageCheck.Infrastructure.Services;
 
 public sealed class Win32ProcessDetector : IProcessDetector
 {
+    private readonly ILogger<Win32ProcessDetector> _logger;
+
+    public Win32ProcessDetector(ILogger<Win32ProcessDetector> logger)
+    {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
     public IReadOnlySet<string> GetRunningProcessNames()
     {
         var processNames = new HashSet<string>(StringComparer.Ordinal);
@@ -14,11 +23,20 @@ public sealed class Win32ProcessDetector : IProcessDetector
         {
             try
             {
+                if (process.SessionId == 0)
+                {
+                    continue;
+                }
+
                 var normalizedProcessName = ProcessNameNormalizer.Normalize(process.ProcessName);
                 if (normalizedProcessName.Length > 0)
                 {
                     processNames.Add(normalizedProcessName);
                 }
+            }
+            catch (Win32Exception exception)
+            {
+                _logger.LogWarning(exception, "Unable to inspect process {ProcessId}.", process.Id);
             }
             catch (InvalidOperationException)
             {
