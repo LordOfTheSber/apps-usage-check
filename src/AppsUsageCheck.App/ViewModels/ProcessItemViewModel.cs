@@ -26,10 +26,12 @@ public partial class ProcessItemViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsPaused))]
     [NotifyPropertyChangedFor(nameof(StateText))]
     [NotifyPropertyChangedFor(nameof(ActionText))]
+    [NotifyPropertyChangedFor(nameof(StatusIndicatorState))]
     private TrackingState trackingState;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(StateText))]
+    [NotifyPropertyChangedFor(nameof(StatusIndicatorState))]
     private bool isRunning;
 
     [ObservableProperty]
@@ -83,6 +85,12 @@ public partial class ProcessItemViewModel : ObservableObject
     public string SecondaryName => string.IsNullOrWhiteSpace(DisplayName) ? "No display name" : ProcessName;
 
     public bool IsPaused => TrackingState == TrackingState.Paused;
+
+    public ProcessItemStatusIndicatorState StatusIndicatorState => IsPaused
+        ? ProcessItemStatusIndicatorState.Paused
+        : IsRunning
+            ? ProcessItemStatusIndicatorState.Running
+            : ProcessItemStatusIndicatorState.Idle;
 
     public string StateText => IsPaused
         ? "Paused"

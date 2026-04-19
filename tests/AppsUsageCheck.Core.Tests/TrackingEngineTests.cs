@@ -118,7 +118,7 @@ public sealed class TrackingEngineTests
         Assert.Equal(2, processDetector.TargetLookupRequests.Count);
         Assert.Equal(["code"], processDetector.TargetLookupRequests[0]);
         Assert.Equal(["code"], processDetector.TargetLookupRequests[1]);
-        Assert.Equal(1, foregroundDetector.GetForegroundProcessNameCallCount);
+        Assert.Equal(2, foregroundDetector.GetForegroundProcessNameCallCount);
     }
 
     [Fact]
@@ -742,6 +742,36 @@ public sealed class TrackingEngineTests
         Assert.Equal(now.AddSeconds(5), closedSession.SessionEnd);
         Assert.Equal(1, closedSession.TotalRunningSeconds);
         Assert.Equal(1, closedSession.ForegroundSeconds);
+    }
+
+    [Fact]
+    public async Task StartAsync_RunningTrackedProcess_ReportsRunningImmediately()
+    {
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "code.exe",
+        };
+
+        var repository = new FakeUsageRepository(new[] { trackedProcess });
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "code.exe" });
+        var foregroundDetector = new FakeForegroundDetector("code");
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30));
+
+        await engine.StartAsync();
+
+        var status = Assert.Single(engine.GetAllStatuses());
+        Assert.Equal("code", status.ProcessName);
+        Assert.Equal(TrackingState.Active, status.TrackingState);
+        Assert.True(status.IsRunning);
+        Assert.True(status.IsForeground);
+        Assert.Empty(repository.AddedSessions);
     }
 
     [Fact]

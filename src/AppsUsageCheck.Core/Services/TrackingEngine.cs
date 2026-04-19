@@ -416,6 +416,9 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
         var runningProcessNames = activeTargetProcessNames.Length == 0
             ? []
             : NormalizeProcessNames(_processDetector.GetRunningTargetProcessNames(activeTargetProcessNames));
+        var foregroundProcessName = runningProcessNames.Count == 0
+            ? string.Empty
+            : ProcessNameNormalizer.Normalize(_foregroundDetector.GetForegroundProcessName());
         var runtimes = new List<TrackedProcessRuntime>(trackedProcesses.Count);
         var now = _timeProvider.GetUtcNow();
 
@@ -424,6 +427,8 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
             var normalizedProcessName = ProcessNameNormalizer.Normalize(trackedProcess.ProcessName);
             var normalizedTrackedProcess = CloneTrackedProcess(trackedProcess);
             normalizedTrackedProcess.ProcessName = normalizedProcessName;
+            var isRunning = !normalizedTrackedProcess.IsPaused && runningProcessNames.Contains(normalizedTrackedProcess.ProcessName);
+            var isForeground = isRunning && string.Equals(normalizedTrackedProcess.ProcessName, foregroundProcessName, StringComparison.Ordinal);
 
             var totalRunningSeconds = await _usageRepository.GetTotalRunningSecondsAsync(normalizedTrackedProcess.Id, cancellationToken).ConfigureAwait(false);
             var foregroundSeconds = await _usageRepository.GetTotalForegroundSecondsAsync(normalizedTrackedProcess.Id, cancellationToken).ConfigureAwait(false);
@@ -444,6 +449,8 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
                 ProcessName = normalizedTrackedProcess.ProcessName,
                 DisplayName = normalizedTrackedProcess.DisplayName,
                 TrackingState = normalizedTrackedProcess.IsPaused ? TrackingState.Paused : TrackingState.Active,
+                IsRunning = isRunning,
+                IsForeground = isForeground,
                 TotalRunningSeconds = totalRunningSeconds,
                 ForegroundSeconds = foregroundSeconds,
             };

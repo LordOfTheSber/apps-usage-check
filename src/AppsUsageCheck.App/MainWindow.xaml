@@ -2,7 +2,7 @@
     x:Class="AppsUsageCheck.App.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:coreEnums="clr-namespace:AppsUsageCheck.Core.Enums;assembly=AppsUsageCheck.Core"
+    xmlns:controls="clr-namespace:AppsUsageCheck.App.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Title="Apps Usage Check"
@@ -80,12 +80,8 @@
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="220" />
+          <ColumnDefinition Width="360" />
           <ColumnDefinition Width="16" />
-          <ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="180" />
-          <ColumnDefinition Width="12" />
-          <ColumnDefinition Width="180" />
           <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
@@ -94,47 +90,15 @@
             FontWeight="SemiBold"
             Text="Time Range" />
 
-        <ComboBox
+        <controls:DateRangePicker
             Grid.Column="1"
             Margin="12,0,0,0"
-            SelectedValue="{Binding SelectedPreset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-            SelectedValuePath="Tag"
-            Style="{StaticResource FilterComboBoxStyle}">
-          <ComboBoxItem Content="All Time" Tag="{x:Static coreEnums:TimeRangePreset.AllTime}" />
-          <ComboBoxItem Content="Today" Tag="{x:Static coreEnums:TimeRangePreset.Today}" />
-          <ComboBoxItem Content="Yesterday" Tag="{x:Static coreEnums:TimeRangePreset.Yesterday}" />
-          <ComboBoxItem Content="Last 3 Days" Tag="{x:Static coreEnums:TimeRangePreset.Last3Days}" />
-          <ComboBoxItem Content="Last 7 Days" Tag="{x:Static coreEnums:TimeRangePreset.Last7Days}" />
-          <ComboBoxItem Content="Last 14 Days" Tag="{x:Static coreEnums:TimeRangePreset.Last14Days}" />
-          <ComboBoxItem Content="Last 30 Days" Tag="{x:Static coreEnums:TimeRangePreset.Last30Days}" />
-          <ComboBoxItem Content="This Week" Tag="{x:Static coreEnums:TimeRangePreset.ThisWeek}" />
-          <ComboBoxItem Content="Last Week" Tag="{x:Static coreEnums:TimeRangePreset.LastWeek}" />
-          <ComboBoxItem Content="This Month" Tag="{x:Static coreEnums:TimeRangePreset.ThisMonth}" />
-          <ComboBoxItem Content="Last Month" Tag="{x:Static coreEnums:TimeRangePreset.LastMonth}" />
-          <ComboBoxItem Content="Custom" Tag="{x:Static coreEnums:TimeRangePreset.Custom}" />
-        </ComboBox>
+            EndDate="{Binding CustomEndDate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            SelectedPreset="{Binding SelectedPreset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            StartDate="{Binding CustomStartDate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
         <TextBlock
             Grid.Column="3"
-            VerticalAlignment="Center"
-            FontWeight="SemiBold"
-            Text="From"
-            Visibility="{Binding IsCustomRangeSelected, Converter={StaticResource BoolToVisibilityConverter}}" />
-
-        <DatePicker
-            Grid.Column="4"
-            SelectedDate="{Binding CustomStartDate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-            SelectedDateFormat="Short"
-            Visibility="{Binding IsCustomRangeSelected, Converter={StaticResource BoolToVisibilityConverter}}" />
-
-        <DatePicker
-            Grid.Column="6"
-            SelectedDate="{Binding CustomEndDate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-            SelectedDateFormat="Short"
-            Visibility="{Binding IsCustomRangeSelected, Converter={StaticResource BoolToVisibilityConverter}}" />
-
-        <TextBlock
-            Grid.Column="7"
             HorizontalAlignment="Right"
             VerticalAlignment="Center"
             Foreground="{StaticResource SecondaryTextBrush}"
@@ -185,7 +149,7 @@
                     <Ellipse
                         Width="12"
                         Height="12"
-                        Fill="{Binding Converter={StaticResource ProcessItemStatusBrushConverter}}" />
+                        Fill="{Binding StatusIndicatorState, Converter={StaticResource ProcessItemStatusBrushConverter}}" />
                   </Grid>
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>

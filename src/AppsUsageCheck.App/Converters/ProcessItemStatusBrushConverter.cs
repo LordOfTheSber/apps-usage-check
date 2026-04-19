@@ -13,17 +13,17 @@ public sealed class ProcessItemStatusBrushConverter : IValueConverter
 
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
-        if (value is not ProcessItemViewModel item)
+        if (value is not ProcessItemStatusIndicatorState state)
         {
             return IdleBrush;
         }
 
-        if (item.IsPaused)
+        return state switch
         {
-            return PausedBrush;
-        }
-
-        return item.IsRunning ? RunningBrush : IdleBrush;
+            ProcessItemStatusIndicatorState.Paused => PausedBrush,
+            ProcessItemStatusIndicatorState.Running => RunningBrush,
+            _ => IdleBrush,
+        };
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
