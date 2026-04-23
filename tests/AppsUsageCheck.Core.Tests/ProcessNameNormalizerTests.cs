@@ -9,6 +9,7 @@ public sealed class ProcessNameNormalizerTests
     [InlineData(null, "")]
     [InlineData("", "")]
     [InlineData("   ", "")]
+    [InlineData(".exe", "")]
     [InlineData("Code.exe", "code")]
     [InlineData("  Code.EXE  ", "code")]
     [InlineData("notepad", "notepad")]

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Controls;
 using AppsUsageCheck.App.ViewModels;
 
 namespace AppsUsageCheck.App;
@@ -14,6 +15,7 @@ public partial class MainWindow : Window
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         InitializeComponent();
         DataContext = _viewModel;
+        UpdateColumnSortDirections(_viewModel.CurrentSortColumn, _viewModel.CurrentSortDirection);
 
         Closing += OnClosing;
         Closed += OnClosed;
@@ -59,5 +61,25 @@ public partial class MainWindow : Window
     {
         _isExitRequested = true;
         Application.Current.Shutdown();
+    }
+
+    private void OnProcessesGridSorting(object sender, DataGridSortingEventArgs e)
+    {
+        if (!Enum.TryParse<ProcessGridSortColumn>(e.Column.SortMemberPath, ignoreCase: false, out var sortColumn))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var sortDirection = _viewModel.ApplySort(sortColumn);
+        UpdateColumnSortDirections(sortColumn, sortDirection);
+    }
+
+    private void UpdateColumnSortDirections(ProcessGridSortColumn activeColumn, ListSortDirection direction)
+    {
+        ProcessColumn.SortDirection = activeColumn == ProcessGridSortColumn.Process ? direction : null;
+        StateColumn.SortDirection = activeColumn == ProcessGridSortColumn.State ? direction : null;
+        RunningTimeColumn.SortDirection = activeColumn == ProcessGridSortColumn.RunningTime ? direction : null;
+        ForegroundTimeColumn.SortDirection = activeColumn == ProcessGridSortColumn.ForegroundTime ? direction : null;
     }
 }

@@ -8,6 +8,42 @@ namespace AppsUsageCheck.Core.Tests;
 
 public sealed class TrackingEngineTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Constructor_NonPositivePollingInterval_ThrowsArgumentOutOfRangeException(double pollingIntervalSeconds)
+    {
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+        var repository = new FakeUsageRepository(Array.Empty<TrackedProcess>());
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new TrackingEngine(
+                processDetector,
+                foregroundDetector,
+                repository,
+                pollingInterval: TimeSpan.FromSeconds(pollingIntervalSeconds),
+                flushInterval: TimeSpan.FromSeconds(1)));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Constructor_NonPositiveFlushInterval_ThrowsArgumentOutOfRangeException(double flushIntervalSeconds)
+    {
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+        var repository = new FakeUsageRepository(Array.Empty<TrackedProcess>());
+
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new TrackingEngine(
+                processDetector,
+                foregroundDetector,
+                repository,
+                pollingInterval: TimeSpan.FromSeconds(1),
+                flushInterval: TimeSpan.FromSeconds(flushIntervalSeconds)));
+    }
+
     [Fact]
     public async Task AddTrackedProcessAsync_NormalizesNameAndTrimsDisplayName()
     {
@@ -67,6 +103,26 @@ public sealed class TrackingEngineTests
             () => engine.AddTrackedProcessAsync("CODE.exe"));
 
         Assert.Contains("already being tracked", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddTrackedProcessAsync_EmptyAfterNormalization_ThrowsArgumentException()
+    {
+        var repository = new FakeUsageRepository(Array.Empty<TrackedProcess>());
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30));
+
+        await engine.StartAsync();
+
+        await Assert.ThrowsAsync<ArgumentException>(() => engine.AddTrackedProcessAsync("  .EXE  "));
+        Assert.Empty(repository.AddedTrackedProcesses);
     }
 
     [Fact]
@@ -297,6 +353,45 @@ public sealed class TrackingEngineTests
     }
 
     [Fact]
+    public async Task RemoveTrackedProcessAsync_RunningProcess_ClosesSessionRemovesStatusAndPersistsRemoval()
+    {
+        var now = new DateTimeOffset(2026, 4, 14, 13, 45, 0, TimeSpan.Zero);
+        var timeProvider = new FakeTimeProvider(now);
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "code",
+        };
+
+        var repository = new FakeUsageRepository([trackedProcess]);
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "code.exe" });
+        var foregroundDetector = new FakeForegroundDetector("code");
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30),
+            timeProvider: timeProvider);
+
+        await engine.StartAsync();
+        await engine.ProcessTickAsync();
+
+        timeProvider.Advance(TimeSpan.FromSeconds(5));
+        await engine.RemoveTrackedProcessAsync(trackedProcess.Id);
+
+        Assert.Empty(engine.GetAllStatuses());
+        Assert.Equal([trackedProcess.Id], repository.RemovedTrackedProcessIds);
+
+        var closedSession = Assert.Single(repository.UpdatedSessions);
+        Assert.Equal(trackedProcess.Id, closedSession.TrackedProcessId);
+        Assert.Equal(now.AddSeconds(5), closedSession.SessionEnd);
+        Assert.Equal(1, closedSession.TotalRunningSeconds);
+        Assert.Equal(1, closedSession.ForegroundSeconds);
+    }
+
+    [Fact]
     public async Task PauseAndResumeTrackingAsync_PausedProcessDoesNotAccumulateUntilResumed()
     {
         var now = new DateTimeOffset(2026, 4, 14, 14, 0, 0, TimeSpan.Zero);
@@ -347,6 +442,34 @@ public sealed class TrackingEngineTests
 
         Assert.Equal(2, repository.AddedSessions.Count);
         Assert.Equal(2, repository.UpdatedTrackedProcesses.Count);
+    }
+
+    [Fact]
+    public async Task ApplyTimeAdjustmentAsync_ZeroAdjustment_ThrowsArgumentOutOfRangeException()
+    {
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "chrome",
+        };
+
+        var repository = new FakeUsageRepository(new[] { trackedProcess });
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30));
+
+        await engine.StartAsync();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => engine.ApplyTimeAdjustmentAsync(trackedProcess.Id, TimeAdjustmentTarget.Running, 0));
+
+        Assert.Empty(repository.AddedTimeAdjustments);
     }
 
     [Fact]
@@ -610,6 +733,34 @@ public sealed class TrackingEngineTests
         Assert.Single(repository.UpdatedTrackedProcesses);
         Assert.Equal(trackedProcess.Id, repository.UpdatedTrackedProcesses[0].Id);
         Assert.False(repository.UpdatedTrackedProcesses[0].IsPaused);
+    }
+
+    [Fact]
+    public async Task GetFilteredTotalsAsync_EndNotAfterStart_ThrowsArgumentOutOfRangeException()
+    {
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "chrome",
+        };
+        var from = new DateTimeOffset(2026, 4, 10, 0, 0, 0, TimeSpan.Zero);
+
+        var repository = new FakeUsageRepository([trackedProcess]);
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30));
+
+        await engine.StartAsync();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => engine.GetFilteredTotalsAsync(from, from));
+        Assert.Empty(repository.FilteredRunningRequests);
+        Assert.Empty(repository.FilteredForegroundRequests);
     }
 
     [Fact]
@@ -1074,6 +1225,8 @@ public sealed class TrackingEngineTests
 
         public List<TrackedProcess> UpdatedTrackedProcesses { get; } = [];
 
+        public List<Guid> RemovedTrackedProcessIds { get; } = [];
+
         public List<UsageSession> AddedSessions { get; } = [];
 
         public List<UsageSession> UpdatedSessions { get; } = [];
@@ -1114,6 +1267,7 @@ public sealed class TrackingEngineTests
         public Task RemoveTrackedProcessAsync(Guid trackedProcessId, CancellationToken cancellationToken = default)
         {
             _trackedProcesses.Remove(trackedProcessId);
+            RemovedTrackedProcessIds.Add(trackedProcessId);
             return Task.CompletedTask;
         }
 

@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AppsUsageCheck.App", "src\A
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AppsUsageCheck.Core.Tests", "tests\AppsUsageCheck.Core.Tests\AppsUsageCheck.Core.Tests.csproj", "{D83AC0C6-0A86-43E6-BCF9-5F1E7E3FA53D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AppsUsageCheck.App.Tests", "tests\AppsUsageCheck.App.Tests\AppsUsageCheck.App.Tests.csproj", "{4D181BD2-0CC2-4874-A495-05E413EA5252}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -32,6 +34,10 @@ Global
 		{D83AC0C6-0A86-43E6-BCF9-5F1E7E3FA53D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D83AC0C6-0A86-43E6-BCF9-5F1E7E3FA53D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{D83AC0C6-0A86-43E6-BCF9-5F1E7E3FA53D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4D181BD2-0CC2-4874-A495-05E413EA5252}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4D181BD2-0CC2-4874-A495-05E413EA5252}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4D181BD2-0CC2-4874-A495-05E413EA5252}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4D181BD2-0CC2-4874-A495-05E413EA5252}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

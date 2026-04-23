@@ -114,13 +114,15 @@
           CornerRadius="18"
           Padding="8">
         <DataGrid
+            x:Name="ProcessesGrid"
             ItemsSource="{Binding Processes}"
             IsReadOnly="True"
             EnableRowVirtualization="True"
             EnableColumnVirtualization="True"
             ScrollViewer.CanContentScroll="True"
             VirtualizingPanel.IsVirtualizing="True"
-            VirtualizingPanel.VirtualizationMode="Recycling">
+            VirtualizingPanel.VirtualizationMode="Recycling"
+            Sorting="OnProcessesGridSorting">
           <DataGrid.RowStyle>
             <Style TargetType="DataGridRow">
               <Setter Property="ContextMenu">
@@ -142,7 +144,7 @@
             </Style>
           </DataGrid.RowStyle>
           <DataGrid.Columns>
-            <DataGridTemplateColumn Width="56" Header="">
+            <DataGridTemplateColumn Width="56" Header="" CanUserSort="False">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
                   <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -155,7 +157,7 @@
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
 
-            <DataGridTemplateColumn Width="2.2*" Header="Process">
+            <DataGridTemplateColumn x:Name="ProcessColumn" Width="2.2*" Header="Process" SortMemberPath="Process">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
                   <StackPanel>
@@ -171,7 +173,7 @@
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
 
-            <DataGridTemplateColumn Width="1.1*" Header="State">
+            <DataGridTemplateColumn x:Name="StateColumn" Width="1.1*" Header="State" SortMemberPath="State">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
                   <StackPanel Orientation="Horizontal">
@@ -195,15 +197,19 @@
             </DataGridTemplateColumn>
 
             <DataGridTextColumn
+                x:Name="RunningTimeColumn"
                 Width="1.1*"
                 Binding="{Binding DisplayedRunningSeconds, Converter={StaticResource SecondsToTimeStringConverter}}"
-                Header="Running Time" />
+                Header="Running Time"
+                SortMemberPath="RunningTime" />
             <DataGridTextColumn
+                x:Name="ForegroundTimeColumn"
                 Width="1.1*"
                 Binding="{Binding DisplayedForegroundSeconds, Converter={StaticResource SecondsToTimeStringConverter}}"
-                Header="Foreground Time" />
+                Header="Foreground Time"
+                SortMemberPath="ForegroundTime" />
 
-            <DataGridTemplateColumn Width="220" Header="Actions">
+            <DataGridTemplateColumn Width="220" Header="Actions" CanUserSort="False">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
                   <StackPanel Orientation="Horizontal">

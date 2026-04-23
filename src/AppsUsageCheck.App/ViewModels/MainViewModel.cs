@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows.Threading;
 using AppsUsageCheck.App.Services;
 using AppsUsageCheck.Core.Enums;
@@ -51,6 +52,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private string databaseStatusText = "Database status pending...";
+
+    public ProcessGridSortColumn CurrentSortColumn { get; private set; } = ProcessGridSortColumn.Process;
+
+    public ListSortDirection CurrentSortDirection { get; private set; } = ListSortDirection.Ascending;
 
     public MainViewModel(
         ITrackingEngine trackingEngine,
@@ -112,6 +117,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public IRelayCommand ExitCommand { get; }
 
     public IRelayCommand RefreshCommand { get; }
+
+    public ListSortDirection ApplySort(ProcessGridSortColumn sortColumn)
+    {
+        CurrentSortDirection = CurrentSortColumn == sortColumn
+            ? ToggleSortDirection(CurrentSortDirection)
+            : ListSortDirection.Ascending;
+        CurrentSortColumn = sortColumn;
+
+        RebuildCollection(ProcessGridSorter.OrderItems(Processes, CurrentSortColumn, CurrentSortDirection));
+        return CurrentSortDirection;
+    }
 
     public async Task InitializeAsync()
     {
@@ -304,7 +320,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task RefreshStatusesAsync(bool forceFilteredTotalsRefresh = false)
+    internal async Task RefreshStatusesAsync(bool forceFilteredTotalsRefresh = false)
     {
         if (_isRefreshing)
         {
@@ -317,10 +333,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             UpdateDatabaseStatus();
             var nowLocal = _timeProvider.GetLocalNow();
-            var statuses = _trackingEngine.GetAllStatuses()
-                .OrderBy(status => status.DisplayName ?? status.ProcessName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(status => status.ProcessName, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            var statuses = _trackingEngine.GetAllStatuses().ToArray();
             var activeIds = statuses.Select(status => status.TrackedProcessId).ToHashSet();
             var filteredTotals = await GetFilteredTotalsIfNeededAsync(activeIds, nowLocal, forceFilteredTotalsRefresh).ConfigureAwait(true);
 
@@ -361,7 +374,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 orderedItems.Add(item);
             }
 
-            RebuildCollection(orderedItems);
+            RebuildCollection(ProcessGridSorter.OrderItems(orderedItems, CurrentSortColumn, CurrentSortDirection));
 
             LastRefreshedAt = nowLocal;
             StatusMessage = BuildStatusMessage();
@@ -580,5 +593,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         DatabaseConnectionState = _databaseHealthCheck.ConnectionState;
         DatabaseStatusText = _databaseHealthCheck.StatusText;
+    }
+
+    private static ListSortDirection ToggleSortDirection(ListSortDirection direction)
+    {
+        return direction == ListSortDirection.Ascending
+            ? ListSortDirection.Descending
+            : ListSortDirection.Ascending;
     }
 }
