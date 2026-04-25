@@ -267,7 +267,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    private async Task EditTimeAsync(Guid trackedProcessId)
+    private async Task EditProcessAsync(Guid trackedProcessId)
     {
         try
         {
@@ -276,58 +276,36 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
             if (status is null)
             {
-                _dialogService.ShowError("Unable to edit time", "The selected process is no longer available.");
+                _dialogService.ShowError("Unable to edit process", "The selected process is no longer available.");
                 await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
                 return;
             }
 
-            var request = await _dialogService.ShowEditTimeDialogAsync(status).ConfigureAwait(true);
-            if (request is null)
+            var result = await _dialogService.ShowEditProcessDialogAsync(status).ConfigureAwait(true);
+            if (result is null)
             {
                 return;
             }
 
-            await _trackingEngine
-                .ApplyTimeAdjustmentAsync(trackedProcessId, request.Target, request.AdjustmentSeconds, request.Reason)
-                .ConfigureAwait(true);
+            if (result.Rename is { } rename)
+            {
+                await _trackingEngine
+                    .UpdateTrackedProcessDisplayNameAsync(trackedProcessId, rename.DisplayName)
+                    .ConfigureAwait(true);
+            }
+
+            if (result.TimeAdjustment is { } adjustment)
+            {
+                await _trackingEngine
+                    .ApplyTimeAdjustmentAsync(trackedProcessId, adjustment.Target, adjustment.AdjustmentSeconds, adjustment.Reason)
+                    .ConfigureAwait(true);
+            }
 
             await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
         }
         catch (Exception exception)
         {
-            _dialogService.ShowError("Unable to edit time", exception.Message);
-        }
-    }
-
-    private async Task RenameTrackedProcessAsync(Guid trackedProcessId)
-    {
-        try
-        {
-            var status = _trackingEngine.GetAllStatuses()
-                .FirstOrDefault(candidate => candidate.TrackedProcessId == trackedProcessId);
-
-            if (status is null)
-            {
-                _dialogService.ShowError("Unable to rename process", "The selected process is no longer available.");
-                await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
-                return;
-            }
-
-            var request = await _dialogService.ShowRenameProcessDialogAsync(status).ConfigureAwait(true);
-            if (request is null)
-            {
-                return;
-            }
-
-            await _trackingEngine
-                .UpdateTrackedProcessDisplayNameAsync(trackedProcessId, request.DisplayName)
-                .ConfigureAwait(true);
-
-            await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
-        }
-        catch (Exception exception)
-        {
-            _dialogService.ShowError("Unable to rename process", exception.Message);
+            _dialogService.ShowError("Unable to edit process", exception.Message);
         }
     }
 
@@ -384,8 +362,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         status.TrackedProcessId,
                         PauseTrackingAsync,
                         ResumeTrackingAsync,
-                        RenameTrackedProcessAsync,
-                        EditTimeAsync,
+                        EditProcessAsync,
                         RemoveTrackedProcessAsync);
                     _itemsById.Add(status.TrackedProcessId, item);
                 }

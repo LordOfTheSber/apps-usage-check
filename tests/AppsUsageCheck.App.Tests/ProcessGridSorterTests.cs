@@ -85,7 +85,6 @@ public sealed class ProcessGridSorterTests
             _ => Task.CompletedTask,
             _ => Task.CompletedTask,
             _ => Task.CompletedTask,
-            _ => Task.CompletedTask,
             _ => Task.CompletedTask);
 
         item.Update(

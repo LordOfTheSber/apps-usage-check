@@ -9,10 +9,10 @@ using Xunit;
 
 namespace AppsUsageCheck.App.Tests;
 
-public sealed class MainViewModelRenameTests
+public sealed class MainViewModelEditProcessTests
 {
     [Fact]
-    public async Task RenameCommand_RenamesDisplayNameAndRefreshesVisibleItem()
+    public async Task EditCommand_RenameOnly_UpdatesDisplayNameAndSkipsTimeAdjustment()
     {
         var trackedProcessId = Guid.NewGuid();
         var trackingEngine = new FakeTrackingEngine(
@@ -26,7 +26,9 @@ public sealed class MainViewModelRenameTests
             ]);
         var dialogService = new FakeDialogService
         {
-            RenameProcessDialogResult = new RenameProcessRequest("Visual Studio Code"),
+            EditProcessDialogResult = new EditProcessResult(
+                new RenameProcessRequest("Visual Studio Code"),
+                TimeAdjustment: null),
         };
 
         using var viewModel = new MainViewModel(
@@ -38,13 +40,124 @@ public sealed class MainViewModelRenameTests
         await viewModel.RefreshStatusesAsync(forceFilteredTotalsRefresh: true);
 
         var item = Assert.Single(viewModel.Processes);
-        await item.RenameCommand.ExecuteAsync(null);
+        await item.EditCommand.ExecuteAsync(null);
 
         Assert.Equal([(trackedProcessId, "Visual Studio Code")], trackingEngine.RenameRequests);
-        Assert.NotNull(dialogService.LastRenameStatus);
-        Assert.Equal(trackedProcessId, dialogService.LastRenameStatus!.TrackedProcessId);
+        Assert.Empty(trackingEngine.TimeAdjustmentRequests);
+        Assert.Equal(trackedProcessId, dialogService.LastEditStatus!.TrackedProcessId);
         Assert.Equal("Visual Studio Code", item.PrimaryName);
         Assert.Equal("code", item.SecondaryName);
+    }
+
+    [Fact]
+    public async Task EditCommand_TimeOnly_AppliesAdjustmentAndSkipsRename()
+    {
+        var trackedProcessId = Guid.NewGuid();
+        var trackingEngine = new FakeTrackingEngine(
+            [
+                new ProcessStatus
+                {
+                    TrackedProcessId = trackedProcessId,
+                    ProcessName = "code",
+                    DisplayName = "Visual Studio Code",
+                    TrackingState = TrackingState.Active,
+                    TotalRunningSeconds = 60,
+                    ForegroundSeconds = 30,
+                }
+            ]);
+        var dialogService = new FakeDialogService
+        {
+            EditProcessDialogResult = new EditProcessResult(
+                Rename: null,
+                new EditTimeRequest(TimeAdjustmentTarget.Running, 1800, "missed session")),
+        };
+
+        using var viewModel = new MainViewModel(
+            trackingEngine,
+            dialogService,
+            TimeProvider.System,
+            new FakeDatabaseHealthCheck());
+
+        await viewModel.RefreshStatusesAsync(forceFilteredTotalsRefresh: true);
+
+        var item = Assert.Single(viewModel.Processes);
+        await item.EditCommand.ExecuteAsync(null);
+
+        Assert.Empty(trackingEngine.RenameRequests);
+        Assert.Equal(
+            [(trackedProcessId, TimeAdjustmentTarget.Running, 1800L, "missed session")],
+            trackingEngine.TimeAdjustmentRequests);
+    }
+
+    [Fact]
+    public async Task EditCommand_BothChanges_AppliesRenameThenTimeAdjustment()
+    {
+        var trackedProcessId = Guid.NewGuid();
+        var trackingEngine = new FakeTrackingEngine(
+            [
+                new ProcessStatus
+                {
+                    TrackedProcessId = trackedProcessId,
+                    ProcessName = "code",
+                    TrackingState = TrackingState.Active,
+                }
+            ]);
+        var dialogService = new FakeDialogService
+        {
+            EditProcessDialogResult = new EditProcessResult(
+                new RenameProcessRequest("Visual Studio Code"),
+                new EditTimeRequest(TimeAdjustmentTarget.Foreground, -120, null)),
+        };
+
+        using var viewModel = new MainViewModel(
+            trackingEngine,
+            dialogService,
+            TimeProvider.System,
+            new FakeDatabaseHealthCheck());
+
+        await viewModel.RefreshStatusesAsync(forceFilteredTotalsRefresh: true);
+
+        var item = Assert.Single(viewModel.Processes);
+        await item.EditCommand.ExecuteAsync(null);
+
+        Assert.Equal([(trackedProcessId, "Visual Studio Code")], trackingEngine.RenameRequests);
+        Assert.Equal(
+            [(trackedProcessId, TimeAdjustmentTarget.Foreground, -120L, (string?)null)],
+            trackingEngine.TimeAdjustmentRequests);
+        Assert.Equal("Visual Studio Code", item.PrimaryName);
+    }
+
+    [Fact]
+    public async Task EditCommand_DialogCancelled_NoEngineCalls()
+    {
+        var trackedProcessId = Guid.NewGuid();
+        var trackingEngine = new FakeTrackingEngine(
+            [
+                new ProcessStatus
+                {
+                    TrackedProcessId = trackedProcessId,
+                    ProcessName = "code",
+                    TrackingState = TrackingState.Active,
+                }
+            ]);
+        var dialogService = new FakeDialogService
+        {
+            EditProcessDialogResult = null,
+        };
+
+        using var viewModel = new MainViewModel(
+            trackingEngine,
+            dialogService,
+            TimeProvider.System,
+            new FakeDatabaseHealthCheck());
+
+        await viewModel.RefreshStatusesAsync(forceFilteredTotalsRefresh: true);
+
+        var item = Assert.Single(viewModel.Processes);
+        await item.EditCommand.ExecuteAsync(null);
+
+        Assert.Empty(trackingEngine.RenameRequests);
+        Assert.Empty(trackingEngine.TimeAdjustmentRequests);
     }
 
     private sealed class FakeTrackingEngine : ITrackingEngine
@@ -57,6 +170,8 @@ public sealed class MainViewModelRenameTests
         public IReadOnlyList<ProcessStatus> Statuses { get; private set; }
 
         public List<(Guid TrackedProcessId, string? DisplayName)> RenameRequests { get; } = [];
+
+        public List<(Guid TrackedProcessId, TimeAdjustmentTarget Target, long AdjustmentSeconds, string? Reason)> TimeAdjustmentRequests { get; } = [];
 
         public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
@@ -122,7 +237,8 @@ public sealed class MainViewModelRenameTests
             string? reason = null,
             CancellationToken cancellationToken = default)
         {
-            throw new NotSupportedException();
+            TimeAdjustmentRequests.Add((trackedProcessId, target, adjustmentSeconds, reason));
+            return Task.CompletedTask;
         }
 
         private static ProcessStatus CloneStatus(ProcessStatus status, string? displayName)
@@ -146,9 +262,9 @@ public sealed class MainViewModelRenameTests
 
     private sealed class FakeDialogService : IDialogService
     {
-        public RenameProcessRequest? RenameProcessDialogResult { get; set; }
+        public EditProcessResult? EditProcessDialogResult { get; set; }
 
-        public ProcessStatus? LastRenameStatus { get; private set; }
+        public ProcessStatus? LastEditStatus { get; private set; }
 
         public Task<AddProcessRequest?> ShowAddProcessDialogAsync(
             IReadOnlyCollection<string> trackedProcessNames,
@@ -157,19 +273,12 @@ public sealed class MainViewModelRenameTests
             throw new NotSupportedException();
         }
 
-        public Task<RenameProcessRequest?> ShowRenameProcessDialogAsync(
+        public Task<EditProcessResult?> ShowEditProcessDialogAsync(
             ProcessStatus status,
             CancellationToken cancellationToken = default)
         {
-            LastRenameStatus = status;
-            return Task.FromResult(RenameProcessDialogResult);
-        }
-
-        public Task<EditTimeRequest?> ShowEditTimeDialogAsync(
-            ProcessStatus status,
-            CancellationToken cancellationToken = default)
-        {
-            throw new NotSupportedException();
+            LastEditStatus = status;
+            return Task.FromResult(EditProcessDialogResult);
         }
 
         public void ShowSettingsDialog()

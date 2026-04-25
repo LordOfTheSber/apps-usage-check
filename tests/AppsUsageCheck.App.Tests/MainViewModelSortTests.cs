@@ -165,14 +165,7 @@ public sealed class MainViewModelSortTests
             throw new NotSupportedException();
         }
 
-        public Task<EditTimeRequest?> ShowEditTimeDialogAsync(
-            ProcessStatus status,
-            CancellationToken cancellationToken = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<RenameProcessRequest?> ShowRenameProcessDialogAsync(
+        public Task<EditProcessResult?> ShowEditProcessDialogAsync(
             ProcessStatus status,
             CancellationToken cancellationToken = default)
         {

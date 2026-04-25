@@ -9,8 +9,7 @@ public partial class ProcessItemViewModel : ObservableObject
 {
     private readonly Func<Guid, Task> _pauseAsync;
     private readonly Func<Guid, Task> _resumeAsync;
-    private readonly Func<Guid, Task> _renameAsync;
-    private readonly Func<Guid, Task> _editTimeAsync;
+    private readonly Func<Guid, Task> _editAsync;
     private readonly Func<Guid, Task> _removeAsync;
 
     [ObservableProperty]
@@ -65,20 +64,17 @@ public partial class ProcessItemViewModel : ObservableObject
         Guid trackedProcessId,
         Func<Guid, Task> pauseAsync,
         Func<Guid, Task> resumeAsync,
-        Func<Guid, Task> renameAsync,
-        Func<Guid, Task> editTimeAsync,
+        Func<Guid, Task> editAsync,
         Func<Guid, Task> removeAsync)
     {
         TrackedProcessId = trackedProcessId;
         _pauseAsync = pauseAsync ?? throw new ArgumentNullException(nameof(pauseAsync));
         _resumeAsync = resumeAsync ?? throw new ArgumentNullException(nameof(resumeAsync));
-        _renameAsync = renameAsync ?? throw new ArgumentNullException(nameof(renameAsync));
-        _editTimeAsync = editTimeAsync ?? throw new ArgumentNullException(nameof(editTimeAsync));
+        _editAsync = editAsync ?? throw new ArgumentNullException(nameof(editAsync));
         _removeAsync = removeAsync ?? throw new ArgumentNullException(nameof(removeAsync));
 
         TogglePauseCommand = new AsyncRelayCommand(TogglePauseAsync);
-        RenameCommand = new AsyncRelayCommand(RenameAsync);
-        EditTimeCommand = new AsyncRelayCommand(EditTimeAsync);
+        EditCommand = new AsyncRelayCommand(EditAsync);
         RemoveCommand = new AsyncRelayCommand(RemoveAsync);
     }
 
@@ -112,9 +108,7 @@ public partial class ProcessItemViewModel : ObservableObject
 
     public IAsyncRelayCommand TogglePauseCommand { get; }
 
-    public IAsyncRelayCommand RenameCommand { get; }
-
-    public IAsyncRelayCommand EditTimeCommand { get; }
+    public IAsyncRelayCommand EditCommand { get; }
 
     public IAsyncRelayCommand RemoveCommand { get; }
 
@@ -157,13 +151,8 @@ public partial class ProcessItemViewModel : ObservableObject
         return _removeAsync(TrackedProcessId);
     }
 
-    private Task RenameAsync()
+    private Task EditAsync()
     {
-        return _renameAsync(TrackedProcessId);
-    }
-
-    private Task EditTimeAsync()
-    {
-        return _editTimeAsync(TrackedProcessId);
+        return _editAsync(TrackedProcessId);
     }
 }

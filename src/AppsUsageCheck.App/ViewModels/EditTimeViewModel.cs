@@ -144,7 +144,9 @@ public sealed class EditTimeViewModel : ObservableObject
 
     public string ValidationMessage => GetValidationError() ?? string.Empty;
 
-    public bool CanSubmit => GetValidationError() is null;
+    public bool CanSubmit => HasPendingChange && GetValidationError() is null;
+
+    public bool HasPendingChange => TryGetMagnitudeSeconds(out var magnitudeSeconds, out _) && magnitudeSeconds > 0;
 
     public string SignedAdjustmentDisplayText
     {
@@ -171,6 +173,13 @@ public sealed class EditTimeViewModel : ObservableObject
         if (errorMessage is not null)
         {
             request = null;
+            return false;
+        }
+
+        if (!HasPendingChange)
+        {
+            request = null;
+            errorMessage = "Enter a non-zero adjustment.";
             return false;
         }
 
@@ -203,7 +212,7 @@ public sealed class EditTimeViewModel : ObservableObject
 
         if (magnitudeSeconds == 0)
         {
-            return "Enter a non-zero adjustment.";
+            return null;
         }
 
         var previewRunningSeconds = CurrentRunningSeconds + (SelectedTargetOption.Target == TimeAdjustmentTarget.Running ? SignedAdjustmentSeconds : 0);
@@ -252,6 +261,7 @@ public sealed class EditTimeViewModel : ObservableObject
         OnPropertyChanged(nameof(HasValidationError));
         OnPropertyChanged(nameof(ValidationMessage));
         OnPropertyChanged(nameof(CanSubmit));
+        OnPropertyChanged(nameof(HasPendingChange));
         OnPropertyChanged(nameof(SignedAdjustmentDisplayText));
     }
 

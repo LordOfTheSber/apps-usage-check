@@ -9,11 +9,7 @@ public interface IDialogService
         IReadOnlyCollection<string> trackedProcessNames,
         CancellationToken cancellationToken = default);
 
-    Task<RenameProcessRequest?> ShowRenameProcessDialogAsync(
-        ProcessStatus status,
-        CancellationToken cancellationToken = default);
-
-    Task<EditTimeRequest?> ShowEditTimeDialogAsync(
+    Task<EditProcessResult?> ShowEditProcessDialogAsync(
         ProcessStatus status,
         CancellationToken cancellationToken = default);
 

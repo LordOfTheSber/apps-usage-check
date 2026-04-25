@@ -132,11 +132,8 @@
                         Command="{Binding TogglePauseCommand}"
                         Header="{Binding ActionText}" />
                     <MenuItem
-                        Command="{Binding RenameCommand}"
-                        Header="Rename" />
-                    <MenuItem
-                        Command="{Binding EditTimeCommand}"
-                        Header="Edit Time" />
+                        Command="{Binding EditCommand}"
+                        Header="Edit…" />
                     <Separator />
                     <MenuItem
                         Command="{Binding RemoveCommand}"
