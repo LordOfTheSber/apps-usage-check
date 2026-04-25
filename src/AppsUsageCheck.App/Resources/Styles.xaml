@@ -11,6 +11,7 @@
   <Color x:Key="AccentColor">#1B6B7A</Color>
   <Color x:Key="AccentHoverColor">#14515D</Color>
   <Color x:Key="DangerColor">#AA3A2B</Color>
+  <Color x:Key="SelectionColor">#DCE7E9</Color>
 
   <SolidColorBrush x:Key="WindowBackgroundBrush" Color="{StaticResource WindowBackgroundColor}" />
   <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}" />
@@ -21,6 +22,7 @@
   <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
   <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}" />
   <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}" />
+  <SolidColorBrush x:Key="SelectionBrush" Color="{StaticResource SelectionColor}" />
 
   <conv:SecondsToTimeStringConverter x:Key="SecondsToTimeStringConverter" />
   <conv:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
@@ -141,5 +143,31 @@
   <Style TargetType="DataGridCell">
     <Setter Property="BorderThickness" Value="0" />
     <Setter Property="Padding" Value="12,10" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}" />
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="DataGridCell">
+          <Border
+              Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}"
+              Padding="{TemplateBinding Padding}"
+              SnapsToDevicePixels="True">
+            <ContentPresenter VerticalAlignment="Center" />
+          </Border>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType="DataGridRow">
+    <Setter Property="Background" Value="Transparent" />
+    <Style.Triggers>
+      <Trigger Property="IsSelected" Value="True">
+        <Setter Property="Background" Value="{StaticResource SelectionBrush}" />
+      </Trigger>
+    </Style.Triggers>
   </Style>
 </ResourceDictionary>

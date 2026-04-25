@@ -124,7 +124,8 @@
             VirtualizingPanel.VirtualizationMode="Recycling"
             Sorting="OnProcessesGridSorting">
           <DataGrid.RowStyle>
-            <Style TargetType="DataGridRow">
+            <Style TargetType="DataGridRow" BasedOn="{StaticResource {x:Type DataGridRow}}">
+              <EventSetter Event="PreviewMouseRightButtonDown" Handler="OnRowPreviewMouseRightButtonDown" />
               <Setter Property="ContextMenu">
                 <Setter.Value>
                   <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">

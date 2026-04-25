@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using AppsUsageCheck.App.ViewModels;
 
 namespace AppsUsageCheck.App;
@@ -73,6 +74,14 @@ public partial class MainWindow : Window
         e.Handled = true;
         var sortDirection = _viewModel.ApplySort(sortColumn);
         UpdateColumnSortDirections(sortColumn, sortDirection);
+    }
+
+    private void OnRowPreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is DataGridRow row && !row.IsSelected)
+        {
+            row.IsSelected = true;
+        }
     }
 
     private void UpdateColumnSortDirections(ProcessGridSortColumn activeColumn, ListSortDirection direction)
