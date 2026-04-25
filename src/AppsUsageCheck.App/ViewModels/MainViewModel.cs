@@ -299,6 +299,38 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private async Task RenameTrackedProcessAsync(Guid trackedProcessId)
+    {
+        try
+        {
+            var status = _trackingEngine.GetAllStatuses()
+                .FirstOrDefault(candidate => candidate.TrackedProcessId == trackedProcessId);
+
+            if (status is null)
+            {
+                _dialogService.ShowError("Unable to rename process", "The selected process is no longer available.");
+                await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
+                return;
+            }
+
+            var request = await _dialogService.ShowRenameProcessDialogAsync(status).ConfigureAwait(true);
+            if (request is null)
+            {
+                return;
+            }
+
+            await _trackingEngine
+                .UpdateTrackedProcessDisplayNameAsync(trackedProcessId, request.DisplayName)
+                .ConfigureAwait(true);
+
+            await RefreshStatusesAsync(forceFilteredTotalsRefresh: true).ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            _dialogService.ShowError("Unable to rename process", exception.Message);
+        }
+    }
+
     private async Task RemoveTrackedProcessAsync(Guid trackedProcessId)
     {
         var process = Processes.FirstOrDefault(item => item.TrackedProcessId == trackedProcessId);
@@ -352,6 +384,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         status.TrackedProcessId,
                         PauseTrackingAsync,
                         ResumeTrackingAsync,
+                        RenameTrackedProcessAsync,
                         EditTimeAsync,
                         RemoveTrackedProcessAsync);
                     _itemsById.Add(status.TrackedProcessId, item);

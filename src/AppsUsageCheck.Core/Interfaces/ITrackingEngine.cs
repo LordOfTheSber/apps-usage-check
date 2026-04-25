@@ -13,6 +13,8 @@ public interface ITrackingEngine
 
     Task<TrackedProcess> AddTrackedProcessAsync(string processName, string? displayName = null, CancellationToken cancellationToken = default);
 
+    Task UpdateTrackedProcessDisplayNameAsync(Guid trackedProcessId, string? displayName, CancellationToken cancellationToken = default);
+
     Task RemoveTrackedProcessAsync(Guid trackedProcessId, CancellationToken cancellationToken = default);
 
     Task PauseTrackingAsync(Guid trackedProcessId, CancellationToken cancellationToken = default);

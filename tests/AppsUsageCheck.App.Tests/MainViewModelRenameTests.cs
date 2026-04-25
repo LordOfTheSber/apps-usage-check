@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using AppsUsageCheck.App.Models;
 using AppsUsageCheck.App.Services;
 using AppsUsageCheck.App.ViewModels;
@@ -10,80 +9,42 @@ using Xunit;
 
 namespace AppsUsageCheck.App.Tests;
 
-public sealed class MainViewModelSortTests
+public sealed class MainViewModelRenameTests
 {
     [Fact]
-    public void Constructor_DefaultsToProcessAscending()
+    public async Task RenameCommand_RenamesDisplayNameAndRefreshesVisibleItem()
     {
-        using var viewModel = CreateViewModel();
+        var trackedProcessId = Guid.NewGuid();
+        var trackingEngine = new FakeTrackingEngine(
+            [
+                new ProcessStatus
+                {
+                    TrackedProcessId = trackedProcessId,
+                    ProcessName = "code",
+                    TrackingState = TrackingState.Active,
+                }
+            ]);
+        var dialogService = new FakeDialogService
+        {
+            RenameProcessDialogResult = new RenameProcessRequest("Visual Studio Code"),
+        };
 
-        Assert.Equal(ProcessGridSortColumn.Process, viewModel.CurrentSortColumn);
-        Assert.Equal(ListSortDirection.Ascending, viewModel.CurrentSortDirection);
-    }
-
-    [Fact]
-    public void ApplySort_SameColumn_TogglesDirection()
-    {
-        using var viewModel = CreateViewModel();
-
-        var direction = viewModel.ApplySort(ProcessGridSortColumn.Process);
-
-        Assert.Equal(ListSortDirection.Descending, direction);
-        Assert.Equal(ProcessGridSortColumn.Process, viewModel.CurrentSortColumn);
-        Assert.Equal(ListSortDirection.Descending, viewModel.CurrentSortDirection);
-    }
-
-    [Fact]
-    public async Task RefreshStatusesAsync_PreservesSelectedSortAcrossValueChangesAndMembershipChanges()
-    {
-        var first = CreateStatus("first", totalRunningSeconds: 30);
-        var second = CreateStatus("second", totalRunningSeconds: 10);
-        var third = CreateStatus("third", totalRunningSeconds: 20);
-        var trackingEngine = new FakeTrackingEngine([first, second, third]);
-
-        using var viewModel = CreateViewModel(trackingEngine);
-        await viewModel.RefreshStatusesAsync(forceFilteredTotalsRefresh: true);
-
-        var initialDirection = viewModel.ApplySort(ProcessGridSortColumn.RunningTime);
-
-        Assert.Equal(ListSortDirection.Ascending, initialDirection);
-        Assert.Equal(["second", "third", "first"], viewModel.Processes.Select(process => process.ProcessName).ToArray());
-
-        trackingEngine.Statuses =
-        [
-            CreateStatus("first", totalRunningSeconds: 5, trackedProcessId: first.TrackedProcessId),
-            CreateStatus("third", totalRunningSeconds: 40, trackedProcessId: third.TrackedProcessId),
-            CreateStatus("fourth", totalRunningSeconds: 15)
-        ];
-
-        await viewModel.RefreshStatusesAsync(forceFilteredTotalsRefresh: true);
-
-        Assert.Equal(ProcessGridSortColumn.RunningTime, viewModel.CurrentSortColumn);
-        Assert.Equal(ListSortDirection.Ascending, viewModel.CurrentSortDirection);
-        Assert.Equal(["first", "fourth", "third"], viewModel.Processes.Select(process => process.ProcessName).ToArray());
-    }
-
-    private static MainViewModel CreateViewModel(FakeTrackingEngine? trackingEngine = null)
-    {
-        return new MainViewModel(
-            trackingEngine ?? new FakeTrackingEngine([]),
-            new FakeDialogService(),
+        using var viewModel = new MainViewModel(
+            trackingEngine,
+            dialogService,
             TimeProvider.System,
             new FakeDatabaseHealthCheck());
-    }
 
-    private static ProcessStatus CreateStatus(
-        string processName,
-        long totalRunningSeconds,
-        Guid? trackedProcessId = null)
-    {
-        return new ProcessStatus
-        {
-            TrackedProcessId = trackedProcessId ?? Guid.NewGuid(),
-            ProcessName = processName,
-            TrackingState = TrackingState.Active,
-            TotalRunningSeconds = totalRunningSeconds,
-        };
+        await viewModel.RefreshStatusesAsync(forceFilteredTotalsRefresh: true);
+
+        var item = Assert.Single(viewModel.Processes);
+        await item.RenameCommand.ExecuteAsync(null);
+
+        Assert.Equal([(trackedProcessId, "Visual Studio Code")], trackingEngine.RenameRequests);
+        Assert.NotNull(dialogService.LastRenameStatus);
+        Assert.Equal(trackedProcessId, dialogService.LastRenameStatus!.TrackedProcessId);
+        Assert.Equal("Visual Studio Code", item.PrimaryName);
+        Assert.Equal("code", item.SecondaryName);
     }
 
     private sealed class FakeTrackingEngine : ITrackingEngine
@@ -93,7 +54,9 @@ public sealed class MainViewModelSortTests
             Statuses = statuses;
         }
 
-        public IReadOnlyList<ProcessStatus> Statuses { get; set; }
+        public IReadOnlyList<ProcessStatus> Statuses { get; private set; }
+
+        public List<(Guid TrackedProcessId, string? DisplayName)> RenameRequests { get; } = [];
 
         public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
@@ -108,7 +71,14 @@ public sealed class MainViewModelSortTests
 
         public Task UpdateTrackedProcessDisplayNameAsync(Guid trackedProcessId, string? displayName, CancellationToken cancellationToken = default)
         {
-            throw new NotSupportedException();
+            RenameRequests.Add((trackedProcessId, displayName));
+            Statuses = Statuses
+                .Select(
+                    status => status.TrackedProcessId == trackedProcessId
+                        ? CloneStatus(status, displayName)
+                        : CloneStatus(status, status.DisplayName))
+                .ToArray();
+            return Task.CompletedTask;
         }
 
         public Task RemoveTrackedProcessAsync(Guid trackedProcessId, CancellationToken cancellationToken = default)
@@ -154,10 +124,32 @@ public sealed class MainViewModelSortTests
         {
             throw new NotSupportedException();
         }
+
+        private static ProcessStatus CloneStatus(ProcessStatus status, string? displayName)
+        {
+            return new ProcessStatus
+            {
+                TrackedProcessId = status.TrackedProcessId,
+                ProcessName = status.ProcessName,
+                DisplayName = displayName,
+                TrackingState = status.TrackingState,
+                IsRunning = status.IsRunning,
+                IsForeground = status.IsForeground,
+                TotalRunningSeconds = status.TotalRunningSeconds,
+                ForegroundSeconds = status.ForegroundSeconds,
+                CurrentSessionRunningSeconds = status.CurrentSessionRunningSeconds,
+                CurrentSessionForegroundSeconds = status.CurrentSessionForegroundSeconds,
+                CurrentSessionStart = status.CurrentSessionStart,
+            };
+        }
     }
 
     private sealed class FakeDialogService : IDialogService
     {
+        public RenameProcessRequest? RenameProcessDialogResult { get; set; }
+
+        public ProcessStatus? LastRenameStatus { get; private set; }
+
         public Task<AddProcessRequest?> ShowAddProcessDialogAsync(
             IReadOnlyCollection<string> trackedProcessNames,
             CancellationToken cancellationToken = default)
@@ -165,14 +157,15 @@ public sealed class MainViewModelSortTests
             throw new NotSupportedException();
         }
 
-        public Task<EditTimeRequest?> ShowEditTimeDialogAsync(
+        public Task<RenameProcessRequest?> ShowRenameProcessDialogAsync(
             ProcessStatus status,
             CancellationToken cancellationToken = default)
         {
-            throw new NotSupportedException();
+            LastRenameStatus = status;
+            return Task.FromResult(RenameProcessDialogResult);
         }
 
-        public Task<RenameProcessRequest?> ShowRenameProcessDialogAsync(
+        public Task<EditTimeRequest?> ShowEditTimeDialogAsync(
             ProcessStatus status,
             CancellationToken cancellationToken = default)
         {

@@ -126,6 +126,92 @@ public sealed class TrackingEngineTests
     }
 
     [Fact]
+    public async Task UpdateTrackedProcessDisplayNameAsync_TrimsDisplayNamePersistsAndUpdatesStatus()
+    {
+        var now = new DateTimeOffset(2026, 4, 14, 11, 30, 0, TimeSpan.Zero);
+        var timeProvider = new FakeTimeProvider(now);
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "code",
+        };
+        var repository = new FakeUsageRepository([trackedProcess]);
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30),
+            timeProvider: timeProvider);
+
+        await engine.StartAsync();
+        await engine.UpdateTrackedProcessDisplayNameAsync(trackedProcess.Id, "  Visual Studio Code  ");
+
+        var status = Assert.Single(engine.GetAllStatuses());
+        Assert.Equal("Visual Studio Code", status.DisplayName);
+
+        var updatedProcess = Assert.Single(repository.UpdatedTrackedProcesses);
+        Assert.Equal(trackedProcess.Id, updatedProcess.Id);
+        Assert.Equal("Visual Studio Code", updatedProcess.DisplayName);
+        Assert.Equal(now, updatedProcess.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task UpdateTrackedProcessDisplayNameAsync_WhitespaceClearsDisplayName()
+    {
+        var trackedProcess = new TrackedProcess
+        {
+            Id = Guid.NewGuid(),
+            ProcessName = "code",
+            DisplayName = "Visual Studio Code",
+        };
+        var repository = new FakeUsageRepository([trackedProcess]);
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30));
+
+        await engine.StartAsync();
+        await engine.UpdateTrackedProcessDisplayNameAsync(trackedProcess.Id, "   ");
+
+        var status = Assert.Single(engine.GetAllStatuses());
+        Assert.Null(status.DisplayName);
+
+        var updatedProcess = Assert.Single(repository.UpdatedTrackedProcesses);
+        Assert.Null(updatedProcess.DisplayName);
+    }
+
+    [Fact]
+    public async Task UpdateTrackedProcessDisplayNameAsync_UnknownTrackedProcess_ThrowsKeyNotFoundException()
+    {
+        var repository = new FakeUsageRepository(Array.Empty<TrackedProcess>());
+        var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        var foregroundDetector = new FakeForegroundDetector(null);
+
+        await using var engine = new TrackingEngine(
+            processDetector,
+            foregroundDetector,
+            repository,
+            pollingInterval: TimeSpan.FromSeconds(1),
+            flushInterval: TimeSpan.FromSeconds(30));
+
+        await engine.StartAsync();
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(
+            () => engine.UpdateTrackedProcessDisplayNameAsync(Guid.NewGuid(), "Visual Studio Code"));
+
+        Assert.Empty(repository.UpdatedTrackedProcesses);
+    }
+
+    [Fact]
     public async Task ProcessTickAsync_RunningForegroundProcess_OpensSessionAndAccumulatesTime()
     {
         var now = new DateTimeOffset(2026, 4, 14, 12, 0, 0, TimeSpan.Zero);

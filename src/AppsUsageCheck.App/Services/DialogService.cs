@@ -38,6 +38,23 @@ public sealed class DialogService : IDialogService
         return Task.FromResult(result);
     }
 
+    public Task<RenameProcessRequest?> ShowRenameProcessDialogAsync(
+        ProcessStatus status,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(status);
+
+        var viewModel = new RenameProcessViewModel(status);
+        var dialog = new RenameProcessDialog(viewModel)
+        {
+            Owner = GetOwnerWindow(),
+        };
+
+        var result = dialog.ShowDialog() == true ? dialog.SelectedRequest : null;
+        return Task.FromResult(result);
+    }
+
     public Task<EditTimeRequest?> ShowEditTimeDialogAsync(
         ProcessStatus status,
         CancellationToken cancellationToken = default)

@@ -189,6 +189,23 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
         return CloneTrackedProcess(trackedProcess);
     }
 
+    public async Task UpdateTrackedProcessDisplayNameAsync(Guid trackedProcessId, string? displayName, CancellationToken cancellationToken = default)
+    {
+        TrackedProcess trackedProcess;
+        var normalizedDisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+
+        lock (_syncRoot)
+        {
+            var runtime = GetRuntime(trackedProcessId);
+            runtime.Process.DisplayName = normalizedDisplayName;
+            runtime.Process.UpdatedAt = _timeProvider.GetUtcNow();
+            runtime.Status.DisplayName = normalizedDisplayName;
+            trackedProcess = CloneTrackedProcess(runtime.Process);
+        }
+
+        await _usageRepository.UpdateTrackedProcessAsync(trackedProcess, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task RemoveTrackedProcessAsync(Guid trackedProcessId, CancellationToken cancellationToken = default)
     {
         TrackedProcessRuntime runtime;

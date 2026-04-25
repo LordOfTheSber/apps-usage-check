@@ -9,6 +9,7 @@ public partial class ProcessItemViewModel : ObservableObject
 {
     private readonly Func<Guid, Task> _pauseAsync;
     private readonly Func<Guid, Task> _resumeAsync;
+    private readonly Func<Guid, Task> _renameAsync;
     private readonly Func<Guid, Task> _editTimeAsync;
     private readonly Func<Guid, Task> _removeAsync;
 
@@ -64,16 +65,19 @@ public partial class ProcessItemViewModel : ObservableObject
         Guid trackedProcessId,
         Func<Guid, Task> pauseAsync,
         Func<Guid, Task> resumeAsync,
+        Func<Guid, Task> renameAsync,
         Func<Guid, Task> editTimeAsync,
         Func<Guid, Task> removeAsync)
     {
         TrackedProcessId = trackedProcessId;
         _pauseAsync = pauseAsync ?? throw new ArgumentNullException(nameof(pauseAsync));
         _resumeAsync = resumeAsync ?? throw new ArgumentNullException(nameof(resumeAsync));
+        _renameAsync = renameAsync ?? throw new ArgumentNullException(nameof(renameAsync));
         _editTimeAsync = editTimeAsync ?? throw new ArgumentNullException(nameof(editTimeAsync));
         _removeAsync = removeAsync ?? throw new ArgumentNullException(nameof(removeAsync));
 
         TogglePauseCommand = new AsyncRelayCommand(TogglePauseAsync);
+        RenameCommand = new AsyncRelayCommand(RenameAsync);
         EditTimeCommand = new AsyncRelayCommand(EditTimeAsync);
         RemoveCommand = new AsyncRelayCommand(RemoveAsync);
     }
@@ -107,6 +111,8 @@ public partial class ProcessItemViewModel : ObservableObject
     public long DisplayedForegroundSeconds => FilteredForegroundSeconds ?? ForegroundSeconds;
 
     public IAsyncRelayCommand TogglePauseCommand { get; }
+
+    public IAsyncRelayCommand RenameCommand { get; }
 
     public IAsyncRelayCommand EditTimeCommand { get; }
 
@@ -149,6 +155,11 @@ public partial class ProcessItemViewModel : ObservableObject
     private Task RemoveAsync()
     {
         return _removeAsync(TrackedProcessId);
+    }
+
+    private Task RenameAsync()
+    {
+        return _renameAsync(TrackedProcessId);
     }
 
     private Task EditTimeAsync()
