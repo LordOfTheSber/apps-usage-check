@@ -8,10 +8,11 @@ artifacts/
 *.rsuser
 *.suo
 
-# IDE settings
+# IDE and tools settings
 .vs/
 .vscode/
 *.code-workspace
+.claude/
 
 # Logs
 logs/

@@ -10,6 +10,7 @@
     Height="720"
     MinWidth="960"
     MinHeight="600"
+    Icon="Assets/app-icon.ico"
     WindowStartupLocation="CenterScreen"
     mc:Ignorable="d">
   <Grid Margin="24">
