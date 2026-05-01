@@ -1,0 +1,3 @@
+namespace UsageTracker.Core.Models;
+
+public sealed record UsageTotals(long RunningSeconds, long ForegroundSeconds);
