@@ -102,6 +102,25 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
             cancellationToken);
     }
 
+    public Task UpdateIconExtractedAtAsync(Guid trackedProcessId, DateTimeOffset? extractedAt, CancellationToken cancellationToken = default)
+    {
+        return ExecuteWriteAsync(
+            "update tracked process icon timestamp",
+            async (dbContext, ct) =>
+            {
+                var trackedProcess = await dbContext.TrackedProcesses
+                    .SingleOrDefaultAsync(entity => entity.Id == trackedProcessId, ct)
+                    .ConfigureAwait(false);
+
+                if (trackedProcess is not null)
+                {
+                    trackedProcess.IconExtractedAt = extractedAt;
+                }
+            },
+            onSucceeded: null,
+            cancellationToken);
+    }
+
     public Task RemoveTrackedProcessAsync(Guid trackedProcessId, CancellationToken cancellationToken = default)
     {
         return ExecuteWriteAsync(
@@ -459,6 +478,7 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
             IsPaused = source.IsPaused,
             CreatedAt = source.CreatedAt,
             UpdatedAt = source.UpdatedAt,
+            IconExtractedAt = source.IconExtractedAt,
         };
     }
 

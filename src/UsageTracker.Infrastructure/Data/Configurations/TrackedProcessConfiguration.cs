@@ -31,6 +31,8 @@ public sealed class TrackedProcessConfiguration : IEntityTypeConfiguration<Track
         builder.Property(trackedProcess => trackedProcess.UpdatedAt)
             .IsRequired();
 
+        builder.Property(trackedProcess => trackedProcess.IconExtractedAt);
+
         builder.HasIndex(trackedProcess => trackedProcess.ProcessName)
             .IsUnique();
 

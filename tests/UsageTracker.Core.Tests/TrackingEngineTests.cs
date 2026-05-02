@@ -1357,6 +1357,16 @@ public sealed class TrackingEngineTests
             return Task.CompletedTask;
         }
 
+        public Task UpdateIconExtractedAtAsync(Guid trackedProcessId, DateTimeOffset? extractedAt, CancellationToken cancellationToken = default)
+        {
+            if (_trackedProcesses.TryGetValue(trackedProcessId, out var trackedProcess))
+            {
+                trackedProcess.IconExtractedAt = extractedAt;
+            }
+
+            return Task.CompletedTask;
+        }
+
         public Task<IReadOnlyList<UsageSession>> GetOpenSessionsAsync(CancellationToken cancellationToken = default)
         {
             return Task.FromResult<IReadOnlyList<UsageSession>>(
@@ -1452,6 +1462,7 @@ public sealed class TrackingEngineTests
                 IsPaused = trackedProcess.IsPaused,
                 CreatedAt = trackedProcess.CreatedAt,
                 UpdatedAt = trackedProcess.UpdatedAt,
+                IconExtractedAt = trackedProcess.IconExtractedAt,
             };
         }
 

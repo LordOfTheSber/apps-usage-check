@@ -9,6 +9,7 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
     private readonly IProcessDetector _processDetector;
     private readonly IForegroundDetector _foregroundDetector;
     private readonly IUsageRepository _usageRepository;
+    private readonly IProcessIconService? _iconService;
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _pollingInterval;
     private readonly TimeSpan _flushInterval;
@@ -29,7 +30,8 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
         TimeSpan pollingInterval,
         TimeSpan flushInterval,
         TimeProvider? timeProvider = null,
-        Action<Exception>? errorHandler = null)
+        Action<Exception>? errorHandler = null,
+        IProcessIconService? iconService = null)
     {
         if (pollingInterval <= TimeSpan.Zero)
         {
@@ -44,6 +46,7 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
         _processDetector = processDetector ?? throw new ArgumentNullException(nameof(processDetector));
         _foregroundDetector = foregroundDetector ?? throw new ArgumentNullException(nameof(foregroundDetector));
         _usageRepository = usageRepository ?? throw new ArgumentNullException(nameof(usageRepository));
+        _iconService = iconService;
         _pollingInterval = pollingInterval;
         _flushInterval = flushInterval;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -170,6 +173,11 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
         };
 
         await _usageRepository.AddTrackedProcessAsync(trackedProcess, cancellationToken).ConfigureAwait(false);
+
+        if (_iconService is not null)
+        {
+            _ = _iconService.TryExtractAndSaveAsync(trackedProcess.Id, normalizedProcessName, cancellationToken);
+        }
 
         var runtime = new TrackedProcessRuntime(
             trackedProcess,
@@ -695,6 +703,7 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
             IsPaused = source.IsPaused,
             CreatedAt = source.CreatedAt,
             UpdatedAt = source.UpdatedAt,
+            IconExtractedAt = source.IconExtractedAt,
         };
     }
 

@@ -1,3 +1,4 @@
+using System.Windows.Media;
 using UsageTracker.Core.Enums;
 using UsageTracker.Core.Models;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -11,6 +12,7 @@ public partial class ProcessItemViewModel : ObservableObject
     private readonly Func<Guid, Task> _resumeAsync;
     private readonly Func<Guid, Task> _editAsync;
     private readonly Func<Guid, Task> _removeAsync;
+    private readonly Func<Guid, Task>? _refreshIconAsync;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PrimaryName))]
@@ -60,22 +62,28 @@ public partial class ProcessItemViewModel : ObservableObject
     [ObservableProperty]
     private long currentSessionForegroundSeconds;
 
+    [ObservableProperty]
+    private ImageSource? iconSource;
+
     public ProcessItemViewModel(
         Guid trackedProcessId,
         Func<Guid, Task> pauseAsync,
         Func<Guid, Task> resumeAsync,
         Func<Guid, Task> editAsync,
-        Func<Guid, Task> removeAsync)
+        Func<Guid, Task> removeAsync,
+        Func<Guid, Task>? refreshIconAsync = null)
     {
         TrackedProcessId = trackedProcessId;
         _pauseAsync = pauseAsync ?? throw new ArgumentNullException(nameof(pauseAsync));
         _resumeAsync = resumeAsync ?? throw new ArgumentNullException(nameof(resumeAsync));
         _editAsync = editAsync ?? throw new ArgumentNullException(nameof(editAsync));
         _removeAsync = removeAsync ?? throw new ArgumentNullException(nameof(removeAsync));
+        _refreshIconAsync = refreshIconAsync;
 
         TogglePauseCommand = new AsyncRelayCommand(TogglePauseAsync);
         EditCommand = new AsyncRelayCommand(EditAsync);
         RemoveCommand = new AsyncRelayCommand(RemoveAsync);
+        RefreshIconCommand = new AsyncRelayCommand(RefreshIconAsync, CanRefreshIcon);
     }
 
     public Guid TrackedProcessId { get; }
@@ -111,6 +119,8 @@ public partial class ProcessItemViewModel : ObservableObject
     public IAsyncRelayCommand EditCommand { get; }
 
     public IAsyncRelayCommand RemoveCommand { get; }
+
+    public IAsyncRelayCommand RefreshIconCommand { get; }
 
     public void Update(ProcessStatus status)
     {
@@ -155,4 +165,11 @@ public partial class ProcessItemViewModel : ObservableObject
     {
         return _editAsync(TrackedProcessId);
     }
+
+    private Task RefreshIconAsync()
+    {
+        return _refreshIconAsync is null ? Task.CompletedTask : _refreshIconAsync(TrackedProcessId);
+    }
+
+    private bool CanRefreshIcon() => _refreshIconAsync is not null;
 }

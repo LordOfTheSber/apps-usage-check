@@ -89,6 +89,10 @@ partial class AppDbContextModelSnapshot : ModelSnapshot
                     .HasColumnType("timestamp with time zone")
                     .HasColumnName("updated_at");
 
+                entity.Property(trackedProcess => trackedProcess.IconExtractedAt)
+                    .HasColumnType("timestamp with time zone")
+                    .HasColumnName("icon_extracted_at");
+
                 entity.HasKey(trackedProcess => trackedProcess.Id)
                     .HasName("pk_tracked_processes");
 

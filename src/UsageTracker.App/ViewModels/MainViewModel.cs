@@ -1,5 +1,9 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using UsageTracker.App.Services;
 using UsageTracker.Core.Enums;
@@ -19,6 +23,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly IDialogService _dialogService;
     private readonly TimeProvider _timeProvider;
     private readonly IDatabaseHealthCheck _databaseHealthCheck;
+    private readonly IProcessIconService? _iconService;
     private readonly DispatcherTimer _refreshTimer;
     private readonly Dictionary<Guid, ProcessItemViewModel> _itemsById = [];
     private readonly HashSet<Guid> _filteredTotalsProcessIds = [];
@@ -61,12 +66,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ITrackingEngine trackingEngine,
         IDialogService dialogService,
         TimeProvider timeProvider,
-        IDatabaseHealthCheck databaseHealthCheck)
+        IDatabaseHealthCheck databaseHealthCheck,
+        IProcessIconService? iconService = null)
     {
         _trackingEngine = trackingEngine ?? throw new ArgumentNullException(nameof(trackingEngine));
         _dialogService = dialogService ?? throw new ArgumentNullException(nameof(dialogService));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _databaseHealthCheck = databaseHealthCheck ?? throw new ArgumentNullException(nameof(databaseHealthCheck));
+        _iconService = iconService;
+
+        if (_iconService is not null)
+        {
+            _iconService.IconRefreshed += OnIconRefreshed;
+        }
 
         var today = _timeProvider.GetLocalNow().Date;
 
@@ -146,6 +158,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _refreshTimer.Stop();
         _refreshTimer.Tick -= OnRefreshTimerTick;
+        if (_iconService is not null)
+        {
+            _iconService.IconRefreshed -= OnIconRefreshed;
+        }
     }
 
     partial void OnSelectedPresetChanged(TimeRangePreset value)
@@ -309,6 +325,78 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private async Task RefreshIconAsync(Guid trackedProcessId)
+    {
+        if (_iconService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var item = Processes.FirstOrDefault(candidate => candidate.TrackedProcessId == trackedProcessId);
+            if (item is null)
+            {
+                return;
+            }
+
+            var extracted = await _iconService.TryExtractAndSaveAsync(trackedProcessId, item.ProcessName).ConfigureAwait(true);
+            if (!extracted)
+            {
+                _dialogService.ShowError(
+                    "Unable to refresh icon",
+                    $"Could not extract an icon for '{item.ProcessName}'. Make sure the process is currently running. " +
+                    "Some system or elevated processes also block access to their executable path — see the application log for details.");
+            }
+        }
+        catch (Exception exception)
+        {
+            _dialogService.ShowError("Unable to refresh icon", exception.Message);
+        }
+    }
+
+    // IconRefreshed fires off the UI thread; marshal before touching bound state.
+    private void OnIconRefreshed(object? sender, IconRefreshedEventArgs e)
+    {
+        Application.Current?.Dispatcher.InvokeAsync(() =>
+        {
+            if (_itemsById.TryGetValue(e.TrackedProcessId, out var item))
+            {
+                item.IconSource = LoadIconFromDisk(e.ProcessName);
+            }
+        });
+    }
+
+    private ImageSource? LoadIconFromDisk(string processName)
+    {
+        if (_iconService is null)
+        {
+            return null;
+        }
+
+        var path = _iconService.GetIconFilePath(processName);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            var bitmap = new BitmapImage();
+            bitmap.BeginInit();
+            bitmap.CacheOption = BitmapCacheOption.OnLoad;
+            bitmap.CreateOptions = BitmapCreateOptions.IgnoreColorProfile;
+            bitmap.UriSource = new Uri(path, UriKind.Absolute);
+            bitmap.EndInit();
+            bitmap.Freeze();
+            return bitmap;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private async Task RemoveTrackedProcessAsync(Guid trackedProcessId)
     {
         var process = Processes.FirstOrDefault(item => item.TrackedProcessId == trackedProcessId);
@@ -363,8 +451,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
                         PauseTrackingAsync,
                         ResumeTrackingAsync,
                         EditProcessAsync,
-                        RemoveTrackedProcessAsync);
+                        RemoveTrackedProcessAsync,
+                        _iconService is null ? null : RefreshIconAsync);
                     _itemsById.Add(status.TrackedProcessId, item);
+
+                    if (_iconService is not null)
+                    {
+                        item.IconSource = LoadIconFromDisk(status.ProcessName);
+                    }
                 }
 
                 item.Update(status);

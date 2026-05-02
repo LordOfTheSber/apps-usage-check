@@ -60,6 +60,9 @@ public partial class App : Application
             var mainViewModel = _host.Services.GetRequiredService<MainViewModel>();
             await mainViewModel.InitializeAsync().ConfigureAwait(true);
 
+            var iconService = _host.Services.GetRequiredService<IProcessIconService>();
+            _ = Task.Run(() => iconService.RefreshMissingForRunningAsync());
+
             _trayIconService = _host.Services.GetRequiredService<ITrayIconService>();
             _trayIconService.Initialize();
 
@@ -175,7 +178,8 @@ public partial class App : Application
                                 TimeSpan.FromMilliseconds(pollingIntervalMilliseconds),
                                 TimeSpan.FromSeconds(flushIntervalSeconds),
                                 serviceProvider.GetRequiredService<TimeProvider>(),
-                                errorHandler: exception => logger.LogError(exception, "Tracking tick failed."));
+                                errorHandler: exception => logger.LogError(exception, "Tracking tick failed."),
+                                iconService: serviceProvider.GetRequiredService<IProcessIconService>());
                         });
                 });
     }

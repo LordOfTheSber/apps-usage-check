@@ -136,6 +136,9 @@
                     <MenuItem
                         Command="{Binding EditCommand}"
                         Header="Edit…" />
+                    <MenuItem
+                        Command="{Binding RefreshIconCommand}"
+                        Header="Refresh icon" />
                     <Separator />
                     <MenuItem
                         Command="{Binding RemoveCommand}"
@@ -146,7 +149,7 @@
             </Style>
           </DataGrid.RowStyle>
           <DataGrid.Columns>
-            <DataGridTemplateColumn Width="56" Header="" CanUserSort="False">
+            <DataGridTemplateColumn Width="36" Header="" CanUserSort="False">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
                   <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
@@ -155,6 +158,20 @@
                         Height="12"
                         Fill="{Binding StatusIndicatorState, Converter={StaticResource ProcessItemStatusBrushConverter}}" />
                   </Grid>
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+
+            <DataGridTemplateColumn Width="56" Header="" CanUserSort="False">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <Image
+                      Width="28"
+                      Height="28"
+                      Source="{Binding IconSource}"
+                      RenderOptions.BitmapScalingMode="HighQuality"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center" />
                 </DataTemplate>
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
