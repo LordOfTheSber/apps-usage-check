@@ -845,12 +845,12 @@ public sealed class TrackingEngineTests
         await engine.StartAsync();
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => engine.GetFilteredTotalsAsync(from, from));
-        Assert.Empty(repository.FilteredRunningRequests);
-        Assert.Empty(repository.FilteredForegroundRequests);
+        Assert.Empty(repository.SessionOverlapRequests);
+        Assert.Empty(repository.AdjustmentRangeRequests);
     }
 
     [Fact]
-    public async Task GetFilteredTotalsAsync_ReturnsRepositoryTotalsForRequestedRange()
+    public async Task GetFilteredTotalsAsync_AggregatesSessionsAndAdjustmentsInRange()
     {
         var trackedProcessA = new TrackedProcess
         {
@@ -865,18 +865,37 @@ public sealed class TrackingEngineTests
         var from = new DateTimeOffset(2026, 4, 10, 0, 0, 0, TimeSpan.Zero);
         var to = new DateTimeOffset(2026, 4, 11, 0, 0, 0, TimeSpan.Zero);
 
+        var sessionA = new UsageSession
+        {
+            Id = Guid.NewGuid(),
+            TrackedProcessId = trackedProcessA.Id,
+            SessionStart = from.AddHours(1),
+            SessionEnd = from.AddHours(2),
+            TotalRunningSeconds = 120,
+            ForegroundSeconds = 60,
+        };
+        var sessionB = new UsageSession
+        {
+            Id = Guid.NewGuid(),
+            TrackedProcessId = trackedProcessB.Id,
+            SessionStart = from.AddHours(3),
+            SessionEnd = from.AddHours(4),
+            TotalRunningSeconds = 45,
+            ForegroundSeconds = 5,
+        };
+        var sessionOutsideRange = new UsageSession
+        {
+            Id = Guid.NewGuid(),
+            TrackedProcessId = trackedProcessA.Id,
+            SessionStart = to.AddHours(1),
+            SessionEnd = to.AddHours(2),
+            TotalRunningSeconds = 999,
+            ForegroundSeconds = 999,
+        };
+
         var repository = new FakeUsageRepository(
             [trackedProcessA, trackedProcessB],
-            filteredRunningSeconds: new Dictionary<RangeQueryKey, long>
-            {
-                [new RangeQueryKey(trackedProcessA.Id, from, to)] = 120,
-                [new RangeQueryKey(trackedProcessB.Id, from, to)] = 45,
-            },
-            filteredForegroundSeconds: new Dictionary<RangeQueryKey, long>
-            {
-                [new RangeQueryKey(trackedProcessA.Id, from, to)] = 60,
-                [new RangeQueryKey(trackedProcessB.Id, from, to)] = 5,
-            });
+            usageSessions: new[] { sessionA, sessionB, sessionOutsideRange });
         var processDetector = new FakeProcessDetector(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
         var foregroundDetector = new FakeForegroundDetector(null);
 
@@ -895,20 +914,10 @@ public sealed class TrackingEngineTests
         Assert.Equal(new UsageTotals(120, 60), totals[trackedProcessA.Id]);
         Assert.Equal(new UsageTotals(45, 5), totals[trackedProcessB.Id]);
 
-        Assert.Equal(
-            new HashSet<RangeQueryKey>
-            {
-                new(trackedProcessA.Id, from, to),
-                new(trackedProcessB.Id, from, to),
-            },
-            repository.FilteredRunningRequests.ToHashSet());
-        Assert.Equal(
-            new HashSet<RangeQueryKey>
-            {
-                new(trackedProcessA.Id, from, to),
-                new(trackedProcessB.Id, from, to),
-            },
-            repository.FilteredForegroundRequests.ToHashSet());
+        Assert.Single(repository.SessionOverlapRequests);
+        Assert.Single(repository.AdjustmentRangeRequests);
+        Assert.Equal(new RangeQueryKey(from, to), repository.SessionOverlapRequests[0]);
+        Assert.Equal(new RangeQueryKey(from, to), repository.AdjustmentRangeRequests[0]);
     }
 
     [Fact]
@@ -1277,17 +1286,15 @@ public sealed class TrackingEngineTests
         private readonly Dictionary<Guid, TrackedProcess> _trackedProcesses;
         private readonly Dictionary<Guid, long> _totalRunningSeconds;
         private readonly Dictionary<Guid, long> _totalForegroundSeconds;
-        private readonly Dictionary<RangeQueryKey, long> _filteredRunningSeconds;
-        private readonly Dictionary<RangeQueryKey, long> _filteredForegroundSeconds;
         private readonly Dictionary<Guid, UsageSession> _sessionsById;
+        private readonly Dictionary<Guid, TimeAdjustment> _adjustmentsById;
 
         public FakeUsageRepository(
             IEnumerable<TrackedProcess> trackedProcesses,
             IDictionary<Guid, long>? totalRunningSeconds = null,
             IDictionary<Guid, long>? totalForegroundSeconds = null,
             IEnumerable<UsageSession>? usageSessions = null,
-            IDictionary<RangeQueryKey, long>? filteredRunningSeconds = null,
-            IDictionary<RangeQueryKey, long>? filteredForegroundSeconds = null)
+            IEnumerable<TimeAdjustment>? timeAdjustments = null)
         {
             _trackedProcesses = trackedProcesses.ToDictionary(process => process.Id, CloneTrackedProcess);
             _totalRunningSeconds = totalRunningSeconds is null
@@ -1296,15 +1303,12 @@ public sealed class TrackingEngineTests
             _totalForegroundSeconds = totalForegroundSeconds is null
                 ? []
                 : new Dictionary<Guid, long>(totalForegroundSeconds);
-            _filteredRunningSeconds = filteredRunningSeconds is null
-                ? []
-                : new Dictionary<RangeQueryKey, long>(filteredRunningSeconds);
-            _filteredForegroundSeconds = filteredForegroundSeconds is null
-                ? []
-                : new Dictionary<RangeQueryKey, long>(filteredForegroundSeconds);
             _sessionsById = usageSessions is null
                 ? []
                 : usageSessions.ToDictionary(session => session.Id, CloneUsageSession);
+            _adjustmentsById = timeAdjustments is null
+                ? []
+                : timeAdjustments.ToDictionary(adjustment => adjustment.Id, CloneTimeAdjustment);
         }
 
         public List<TrackedProcess> AddedTrackedProcesses { get; } = [];
@@ -1319,9 +1323,13 @@ public sealed class TrackingEngineTests
 
         public List<TimeAdjustment> AddedTimeAdjustments { get; } = [];
 
-        public List<RangeQueryKey> FilteredRunningRequests { get; } = [];
+        public List<RangeQueryKey> SessionOverlapRequests { get; } = [];
 
-        public List<RangeQueryKey> FilteredForegroundRequests { get; } = [];
+        public List<RangeQueryKey> AdjustmentRangeRequests { get; } = [];
+
+        public IReadOnlyDictionary<Guid, UsageSession> SessionsById => _sessionsById;
+
+        public IReadOnlyDictionary<Guid, TimeAdjustment> AdjustmentsById => _adjustmentsById;
 
         public Task<IReadOnlyList<TrackedProcess>> GetTrackedProcessesAsync(CancellationToken cancellationToken = default)
         {
@@ -1403,6 +1411,7 @@ public sealed class TrackingEngineTests
         {
             var adjustmentCopy = CloneTimeAdjustment(adjustment);
             AddedTimeAdjustments.Add(adjustmentCopy);
+            _adjustmentsById[adjustmentCopy.Id] = adjustmentCopy;
 
             if (adjustmentCopy.AdjustmentType == TimeAdjustmentTypes.Running)
             {
@@ -1430,26 +1439,36 @@ public sealed class TrackingEngineTests
             return Task.FromResult(_totalForegroundSeconds.TryGetValue(trackedProcessId, out var value) ? value : 0L);
         }
 
-        public Task<long> GetTotalRunningSecondsAsync(
-            Guid trackedProcessId,
+        public Task<IReadOnlyList<UsageSession>> GetSessionsOverlappingAsync(
             DateTimeOffset from,
             DateTimeOffset to,
             CancellationToken cancellationToken = default)
         {
-            var key = new RangeQueryKey(trackedProcessId, from, to);
-            FilteredRunningRequests.Add(key);
-            return Task.FromResult(_filteredRunningSeconds.TryGetValue(key, out var value) ? value : 0L);
+            SessionOverlapRequests.Add(new RangeQueryKey(from, to));
+
+            var matching = _sessionsById.Values
+                .Where(session =>
+                    session.SessionStart < to &&
+                    (session.SessionEnd is null || session.SessionEnd > from))
+                .Select(CloneUsageSession)
+                .ToArray();
+
+            return Task.FromResult<IReadOnlyList<UsageSession>>(matching);
         }
 
-        public Task<long> GetTotalForegroundSecondsAsync(
-            Guid trackedProcessId,
+        public Task<IReadOnlyList<TimeAdjustment>> GetAdjustmentsInRangeAsync(
             DateTimeOffset from,
             DateTimeOffset to,
             CancellationToken cancellationToken = default)
         {
-            var key = new RangeQueryKey(trackedProcessId, from, to);
-            FilteredForegroundRequests.Add(key);
-            return Task.FromResult(_filteredForegroundSeconds.TryGetValue(key, out var value) ? value : 0L);
+            AdjustmentRangeRequests.Add(new RangeQueryKey(from, to));
+
+            var matching = _adjustmentsById.Values
+                .Where(adjustment => adjustment.AppliedAt >= from && adjustment.AppliedAt < to)
+                .Select(CloneTimeAdjustment)
+                .ToArray();
+
+            return Task.FromResult<IReadOnlyList<TimeAdjustment>>(matching);
         }
 
         private static TrackedProcess CloneTrackedProcess(TrackedProcess trackedProcess)
@@ -1497,5 +1516,5 @@ public sealed class TrackingEngineTests
         }
     }
 
-    private sealed record RangeQueryKey(Guid TrackedProcessId, DateTimeOffset From, DateTimeOffset To);
+    private sealed record RangeQueryKey(DateTimeOffset From, DateTimeOffset To);
 }

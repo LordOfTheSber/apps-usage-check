@@ -1,0 +1,74 @@
+<UserControl
+    x:Class="UsageTracker.App.Views.Statistics.PerProcessTotalsView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:lvc="clr-namespace:LiveChartsCore.SkiaSharpView.WPF;assembly=LiveChartsCore.SkiaSharpView.WPF"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+  <Border
+      Background="{StaticResource SurfaceBrush}"
+      BorderBrush="{StaticResource BorderBrush}"
+      BorderThickness="1"
+      CornerRadius="14"
+      Padding="16">
+    <Grid>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto" />
+        <RowDefinition Height="12" />
+        <RowDefinition Height="*" />
+      </Grid.RowDefinitions>
+
+      <StackPanel Orientation="Horizontal">
+        <TextBlock
+            VerticalAlignment="Center"
+            FontWeight="SemiBold"
+            Foreground="{StaticResource PrimaryTextBrush}"
+            Focusable="False"
+            IsHitTestVisible="False"
+            Text="Per-process totals" />
+        <Border
+            Margin="16,0,0,0"
+            Padding="4"
+            Background="{StaticResource SurfaceAltBrush}"
+            BorderBrush="{StaticResource BorderBrush}"
+            BorderThickness="1"
+            CornerRadius="10">
+          <StackPanel Orientation="Horizontal">
+            <RadioButton
+                Margin="2,0"
+                Padding="10,4"
+                VerticalAlignment="Center"
+                VerticalContentAlignment="Center"
+                Content="Running"
+                GroupName="MetricMode"
+                IsChecked="{Binding IsRunningSelected, Mode=TwoWay}" />
+            <RadioButton
+                Margin="2,0"
+                Padding="10,4"
+                VerticalAlignment="Center"
+                VerticalContentAlignment="Center"
+                Content="Foreground"
+                GroupName="MetricMode" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+
+      <Grid Grid.Row="2">
+        <lvc:CartesianChart
+            LegendPosition="Hidden"
+            Series="{Binding Series}"
+            XAxes="{Binding XAxes}"
+            YAxes="{Binding YAxes}"
+            Visibility="{Binding HasData, Converter={StaticResource BoolToVisibilityConverter}}" />
+        <TextBlock
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Foreground="{StaticResource SecondaryTextBrush}"
+            FontSize="14"
+            Text="No usage recorded in this range."
+            Visibility="{Binding HasData, Converter={StaticResource BoolToVisibilityConverter}, ConverterParameter=invert}" />
+      </Grid>
+    </Grid>
+  </Border>
+</UserControl>

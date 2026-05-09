@@ -6,6 +6,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using UsageTracker.App.Services;
+using UsageTracker.App.ViewModels.Statistics;
 using UsageTracker.Core.Enums;
 using UsageTracker.Core.Interfaces;
 using UsageTracker.Core.Models;
@@ -34,6 +35,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private bool _isNormalizingCustomRange;
     private TimeRange? _lastAppliedTimeRange;
     private DateTimeOffset? _nextFilteredRefreshAt;
+    private IReadOnlyDictionary<Guid, UsageTotals>? _lastFilteredTotals;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasProcesses))]
@@ -74,6 +76,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _databaseHealthCheck = databaseHealthCheck ?? throw new ArgumentNullException(nameof(databaseHealthCheck));
         _iconService = iconService;
+        Statistics = new StatisticsViewModel(_trackingEngine);
 
         if (_iconService is not null)
         {
@@ -105,6 +108,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public event EventHandler? ExitRequested;
 
     public ObservableCollection<ProcessItemViewModel> Processes { get; }
+
+    public StatisticsViewModel Statistics { get; }
 
     public bool HasProcesses => Processes.Count > 0;
 
@@ -479,6 +484,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
 
             RebuildCollection(ProcessGridSorter.OrderItems(orderedItems, CurrentSortColumn, CurrentSortDirection));
+
+            if (filteredTotals is not null)
+            {
+                _lastFilteredTotals = filteredTotals;
+            }
+            else if (SelectedPreset == TimeRangePreset.AllTime)
+            {
+                _lastFilteredTotals = null;
+            }
+
+            var statisticsRange = BuildSelectedTimeRange(nowLocal);
+            Statistics.OnRefreshed(_lastFilteredTotals, statuses, statisticsRange);
 
             LastRefreshedAt = nowLocal;
             StatusMessage = BuildStatusMessage();

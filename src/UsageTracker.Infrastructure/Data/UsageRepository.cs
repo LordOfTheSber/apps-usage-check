@@ -280,8 +280,7 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
             cancellationToken);
     }
 
-    public Task<long> GetTotalRunningSecondsAsync(
-        Guid trackedProcessId,
+    public Task<IReadOnlyList<UsageSession>> GetSessionsOverlappingAsync(
         DateTimeOffset from,
         DateTimeOffset to,
         CancellationToken cancellationToken = default)
@@ -293,34 +292,20 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
         return ExecuteReadAsync(
             async (dbContext, ct) =>
             {
-                var sessionTotal = await dbContext.UsageSessions
+                var sessions = await dbContext.UsageSessions
                     .AsNoTracking()
                     .Where(session =>
-                        session.TrackedProcessId == trackedProcessId &&
-                        session.SessionStart >= from &&
-                        session.SessionStart < to)
-                    .Select(session => (long?)session.TotalRunningSeconds)
-                    .SumAsync(ct)
+                        session.SessionStart < to &&
+                        (session.SessionEnd == null || session.SessionEnd > from))
+                    .ToArrayAsync(ct)
                     .ConfigureAwait(false);
 
-                var adjustmentTotal = await dbContext.TimeAdjustments
-                    .AsNoTracking()
-                    .Where(adjustment =>
-                        adjustment.TrackedProcessId == trackedProcessId &&
-                        adjustment.AdjustmentType == TimeAdjustmentTypes.Running &&
-                        adjustment.AppliedAt >= from &&
-                        adjustment.AppliedAt < to)
-                    .Select(adjustment => (long?)adjustment.AdjustmentSeconds)
-                    .SumAsync(ct)
-                    .ConfigureAwait(false);
-
-                return (sessionTotal ?? 0L) + (adjustmentTotal ?? 0L);
+                return (IReadOnlyList<UsageSession>)sessions;
             },
             cancellationToken);
     }
 
-    public Task<long> GetTotalForegroundSecondsAsync(
-        Guid trackedProcessId,
+    public Task<IReadOnlyList<TimeAdjustment>> GetAdjustmentsInRangeAsync(
         DateTimeOffset from,
         DateTimeOffset to,
         CancellationToken cancellationToken = default)
@@ -332,28 +317,15 @@ public sealed class UsageRepository : IUsageRepository, IAsyncDisposable
         return ExecuteReadAsync(
             async (dbContext, ct) =>
             {
-                var sessionTotal = await dbContext.UsageSessions
-                    .AsNoTracking()
-                    .Where(session =>
-                        session.TrackedProcessId == trackedProcessId &&
-                        session.SessionStart >= from &&
-                        session.SessionStart < to)
-                    .Select(session => (long?)session.ForegroundSeconds)
-                    .SumAsync(ct)
-                    .ConfigureAwait(false);
-
-                var adjustmentTotal = await dbContext.TimeAdjustments
+                var adjustments = await dbContext.TimeAdjustments
                     .AsNoTracking()
                     .Where(adjustment =>
-                        adjustment.TrackedProcessId == trackedProcessId &&
-                        adjustment.AdjustmentType == TimeAdjustmentTypes.Foreground &&
                         adjustment.AppliedAt >= from &&
                         adjustment.AppliedAt < to)
-                    .Select(adjustment => (long?)adjustment.AdjustmentSeconds)
-                    .SumAsync(ct)
+                    .ToArrayAsync(ct)
                     .ConfigureAwait(false);
 
-                return (sessionTotal ?? 0L) + (adjustmentTotal ?? 0L);
+                return (IReadOnlyList<TimeAdjustment>)adjustments;
             },
             cancellationToken);
     }

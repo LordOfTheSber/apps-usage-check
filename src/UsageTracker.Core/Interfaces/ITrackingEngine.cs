@@ -30,6 +30,11 @@ public interface ITrackingEngine
         DateTimeOffset to,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<DailyUsageBucket>> GetDailyUsageAsync(
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default);
+
     Task ApplyTimeAdjustmentAsync(
         Guid trackedProcessId,
         TimeAdjustmentTarget target,

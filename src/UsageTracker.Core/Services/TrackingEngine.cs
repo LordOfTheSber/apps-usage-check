@@ -383,31 +383,95 @@ public sealed class TrackingEngine : ITrackingEngine, IAsyncDisposable
             throw new ArgumentOutOfRangeException(nameof(to), "The time range end must be after the start.");
         }
 
-        Guid[] trackedProcessIds;
+        HashSet<Guid> knownIds;
 
         lock (_syncRoot)
         {
-            trackedProcessIds = _trackedProcesses.Keys.ToArray();
+            knownIds = new HashSet<Guid>(_trackedProcesses.Keys);
         }
 
-        var totals = await Task.WhenAll(
-                trackedProcessIds.Select(
-                    async trackedProcessId =>
-                    {
-                        var runningSeconds = await _usageRepository
-                            .GetTotalRunningSecondsAsync(trackedProcessId, from, to, cancellationToken)
-                            .ConfigureAwait(false);
-                        var foregroundSeconds = await _usageRepository
-                            .GetTotalForegroundSecondsAsync(trackedProcessId, from, to, cancellationToken)
-                            .ConfigureAwait(false);
+        var sessionsTask = _usageRepository.GetSessionsOverlappingAsync(from, to, cancellationToken);
+        var adjustmentsTask = _usageRepository.GetAdjustmentsInRangeAsync(from, to, cancellationToken);
 
-                        return new KeyValuePair<Guid, UsageTotals>(
-                            trackedProcessId,
-                            new UsageTotals(runningSeconds, foregroundSeconds));
-                    }))
-            .ConfigureAwait(false);
+        await Task.WhenAll(sessionsTask, adjustmentsTask).ConfigureAwait(false);
 
-        return totals.ToDictionary(pair => pair.Key, pair => pair.Value);
+        var sessions = await sessionsTask.ConfigureAwait(false);
+        var adjustments = await adjustmentsTask.ConfigureAwait(false);
+
+        var contributions = UsageRangeAggregator.Aggregate(
+            sessions,
+            adjustments,
+            from,
+            to,
+            _timeProvider.GetUtcNow());
+
+        var result = new Dictionary<Guid, UsageTotals>(knownIds.Count);
+        foreach (var id in knownIds)
+        {
+            result[id] = new UsageTotals(0L, 0L);
+        }
+
+        foreach (var contribution in contributions)
+        {
+            if (knownIds.Contains(contribution.TrackedProcessId))
+            {
+                result[contribution.TrackedProcessId] = new UsageTotals(
+                    contribution.RunningSeconds,
+                    contribution.ForegroundSeconds);
+            }
+        }
+
+        return result;
+    }
+
+    public async Task<IReadOnlyList<DailyUsageBucket>> GetDailyUsageAsync(
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken = default)
+    {
+        if (to <= from)
+        {
+            throw new ArgumentOutOfRangeException(nameof(to), "The time range end must be after the start.");
+        }
+
+        HashSet<Guid> knownIds;
+
+        lock (_syncRoot)
+        {
+            knownIds = new HashSet<Guid>(_trackedProcesses.Keys);
+        }
+
+        var sessionsTask = _usageRepository.GetSessionsOverlappingAsync(from, to, cancellationToken);
+        var adjustmentsTask = _usageRepository.GetAdjustmentsInRangeAsync(from, to, cancellationToken);
+
+        await Task.WhenAll(sessionsTask, adjustmentsTask).ConfigureAwait(false);
+
+        var sessions = await sessionsTask.ConfigureAwait(false);
+        var adjustments = await adjustmentsTask.ConfigureAwait(false);
+
+        var buckets = DailyBucketing.Bucket(
+            sessions,
+            adjustments,
+            from,
+            to,
+            _timeProvider.GetUtcNow(),
+            _timeProvider.LocalTimeZone);
+
+        if (knownIds.Count == 0)
+        {
+            return Array.Empty<DailyUsageBucket>();
+        }
+
+        var filtered = new List<DailyUsageBucket>(buckets.Count);
+        foreach (var bucket in buckets)
+        {
+            if (knownIds.Contains(bucket.TrackedProcessId))
+            {
+                filtered.Add(bucket);
+            }
+        }
+
+        return filtered;
     }
 
     internal Task ProcessTickAsync(CancellationToken cancellationToken = default)

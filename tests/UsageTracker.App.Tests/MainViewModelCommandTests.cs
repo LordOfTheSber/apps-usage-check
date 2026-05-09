@@ -286,6 +286,14 @@ public sealed class MainViewModelCommandTests
             return Task.FromResult(totals);
         }
 
+        public Task<IReadOnlyList<DailyUsageBucket>> GetDailyUsageAsync(
+            DateTimeOffset from,
+            DateTimeOffset to,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<IReadOnlyList<DailyUsageBucket>>(Array.Empty<DailyUsageBucket>());
+        }
+
         public Task ApplyTimeAdjustmentAsync(
             Guid trackedProcessId,
             TimeAdjustmentTarget target,

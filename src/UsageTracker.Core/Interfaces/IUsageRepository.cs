@@ -30,14 +30,12 @@ public interface IUsageRepository
 
     Task<long> GetTotalForegroundSecondsAsync(Guid trackedProcessId, CancellationToken cancellationToken = default);
 
-    Task<long> GetTotalRunningSecondsAsync(
-        Guid trackedProcessId,
+    Task<IReadOnlyList<UsageSession>> GetSessionsOverlappingAsync(
         DateTimeOffset from,
         DateTimeOffset to,
         CancellationToken cancellationToken = default);
 
-    Task<long> GetTotalForegroundSecondsAsync(
-        Guid trackedProcessId,
+    Task<IReadOnlyList<TimeAdjustment>> GetAdjustmentsInRangeAsync(
         DateTimeOffset from,
         DateTimeOffset to,
         CancellationToken cancellationToken = default);
