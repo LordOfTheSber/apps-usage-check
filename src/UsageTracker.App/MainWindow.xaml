@@ -56,8 +56,6 @@
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="16" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="16" />
       <RowDefinition Height="*" />
       <RowDefinition Height="16" />
       <RowDefinition Height="Auto" />
@@ -70,84 +68,70 @@
         BorderBrush="{StaticResource BorderBrush}"
         BorderThickness="1"
         CornerRadius="18">
-      <Grid>
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
+      <StackPanel>
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
 
-        <StackPanel>
           <TextBlock
+              VerticalAlignment="Center"
               FontSize="30"
               FontWeight="SemiBold"
               Text="Usage Tracker" />
+
+          <StackPanel
+              Grid.Column="1"
+              Orientation="Horizontal"
+              VerticalAlignment="Center">
+            <Button
+                Margin="0,0,12,0"
+                Command="{Binding AddProcessCommand}"
+                Content="Add Process"
+                Style="{StaticResource PrimaryButtonStyle}" />
+            <Button
+                Margin="0,0,12,0"
+                Command="{Binding OpenSettingsCommand}"
+                Content="Settings"
+                Style="{StaticResource SecondaryButtonStyle}" />
+            <Button
+                Command="{Binding ExitCommand}"
+                Content="Exit"
+                Style="{StaticResource DangerButtonStyle}"
+                ToolTip="Stops tracking and closes the app. Use the close button (X) to hide to tray." />
+          </StackPanel>
+        </Grid>
+
+        <Border
+            Height="1"
+            Margin="0,18,0,16"
+            Background="{StaticResource BorderBrush}" />
+
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="360" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+
           <TextBlock
-              Margin="0,8,0,0"
-              Foreground="{StaticResource SecondaryTextBrush}"
-              TextWrapping="Wrap"
-              Text="Track running time and foreground time for the apps you care about. Closing this window hides it; use Exit to stop tracking." />
-        </StackPanel>
+              VerticalAlignment="Center"
+              FontWeight="SemiBold"
+              Text="Time Range" />
 
-        <StackPanel
-            Grid.Column="1"
-            Orientation="Horizontal"
-            VerticalAlignment="Top">
-          <Button
-              Margin="0,0,12,0"
-              Command="{Binding AddProcessCommand}"
-              Content="Add Process"
-              Style="{StaticResource PrimaryButtonStyle}" />
-          <Button
-              Margin="0,0,12,0"
-              Command="{Binding OpenSettingsCommand}"
-              Content="Settings"
-              Style="{StaticResource SecondaryButtonStyle}" />
-          <Button
-              Command="{Binding ExitCommand}"
-              Content="Exit"
-              Style="{StaticResource DangerButtonStyle}" />
-        </StackPanel>
-      </Grid>
-    </Border>
-
-    <Border
-        Grid.Row="2"
-        Padding="18,14"
-        Background="{StaticResource SurfaceBrush}"
-        BorderBrush="{StaticResource BorderBrush}"
-        BorderThickness="1"
-        CornerRadius="14">
-      <Grid>
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="Auto" />
-          <ColumnDefinition Width="360" />
-          <ColumnDefinition Width="16" />
-          <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
-
-        <TextBlock
-            VerticalAlignment="Center"
-            FontWeight="SemiBold"
-            Text="Time Range" />
-
-        <controls:DateRangePicker
-            Grid.Column="1"
-            Margin="12,0,0,0"
-            EndDate="{Binding CustomEndDate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-            SelectedPreset="{Binding SelectedPreset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-            StartDate="{Binding CustomStartDate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-
-        <TextBlock
-            Grid.Column="3"
-            HorizontalAlignment="Right"
-            VerticalAlignment="Center"
-            Foreground="{StaticResource SecondaryTextBrush}"
-            Text="Range applies to both tabs. Running status stays live; filtered totals refresh from persisted history." />
-      </Grid>
+          <controls:DateRangePicker
+              Grid.Column="1"
+              Margin="12,0,0,0"
+              EndDate="{Binding CustomEndDate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+              SelectedPreset="{Binding SelectedPreset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+              StartDate="{Binding CustomStartDate, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+        </Grid>
+      </StackPanel>
     </Border>
 
     <TabControl
-        Grid.Row="4"
+        Grid.Row="2"
         Background="Transparent"
         BorderThickness="0"
         Padding="0">
@@ -331,7 +315,7 @@
     </TabControl>
 
     <Border
-        Grid.Row="6"
+        Grid.Row="4"
         Padding="18,14"
         Background="{StaticResource SurfaceBrush}"
         BorderBrush="{StaticResource BorderBrush}"

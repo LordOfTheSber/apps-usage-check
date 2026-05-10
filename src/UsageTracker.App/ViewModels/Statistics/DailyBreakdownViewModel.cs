@@ -54,6 +54,7 @@ public partial class DailyBreakdownViewModel : ObservableObject
             .ToArray();
 
         var series = new List<ISeries>(byProcess.Length);
+        var colorIndex = 0;
         foreach (var group in byProcess)
         {
             var totals = new double[allDays.Length];
@@ -74,7 +75,7 @@ public partial class DailyBreakdownViewModel : ObservableObject
             }
 
             var name = displayNamesByProcess.TryGetValue(group.Key, out var label) ? label : "—";
-            var color = StatisticsPalette.For(group.Key);
+            var color = StatisticsPalette.ForIndex(colorIndex++);
 
             series.Add(new StackedColumnSeries<double?>
             {

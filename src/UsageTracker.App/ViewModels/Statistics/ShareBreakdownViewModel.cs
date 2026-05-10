@@ -45,10 +45,11 @@ public partial class ShareBreakdownViewModel : ObservableObject
         var otherSeconds = ordered.Skip(TopSliceCount).Sum(kvp => kvp.Value);
 
         var slices = new List<(string Name, long Seconds, SKColor Color)>(top.Length + 1);
+        var colorIndex = 0;
         foreach (var kvp in top)
         {
             var name = displayNamesByProcess.TryGetValue(kvp.Key, out var label) ? label : "—";
-            slices.Add((name, kvp.Value, StatisticsPalette.For(kvp.Key)));
+            slices.Add((name, kvp.Value, StatisticsPalette.ForIndex(colorIndex++)));
         }
 
         if (otherSeconds > 0L)
